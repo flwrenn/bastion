@@ -1,0 +1,110 @@
+# Bastion
+
+ERC-4337 smart account system with session keys and an EVM event indexer,
+sharing a single SvelteKit frontend.
+
+Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2
+(Svelte 5, viem, permissionless.js).
+
+## Architecture
+
+```
+┌──────────────┐     UserOps      ┌─────────────┐     handleOps     ┌────────────┐
+│   Frontend   │ ───────────────► │   Bundler   │ ────────────────► │ EntryPoint │
+│  (SvelteKit) │                  │  (Pimlico)  │                   │   (v0.7)   │
+└──────┬───────┘                  └─────────────┘                   └─────┬──────┘
+       │                                                                  │
+       │  REST / WebSocket                              validateUserOp + execute
+       │                                                                  │
+┌──────▼───────┐                                                  ┌───────▼──────┐
+│   Indexer    │   eth_getLogs / eth_subscribe                    │ SmartAccount │
+│    (Go)      │ ◄──────────────────────────────────────────────  │  (Solidity)  │
+└──────────────┘                                                  └──────────────┘
+```
+
+**Part 1 — Smart Contracts:** ERC-4337 compliant SmartAccount with ECDSA
+owner validation and session keys, deployed via CREATE2 factory. Demo
+contracts (Counter, FaucetToken) for interaction.
+
+**Part 2 — EVM Indexer:** Go backend indexing `UserOperationEvent` from
+EntryPoint v0.7. PostgreSQL persistence, REST API, WebSocket live feed.
+
+**Shared Frontend:** SvelteKit app for wallet connection, smart account
+deployment, owner/session key interactions, and indexer dashboard.
+
+## Directory Structure
+
+```
+bastion/
+├── contracts/          # Foundry — Solidity sources, tests, deploy scripts
+│   ├── src/            # Contract source files
+│   ├── test/           # Foundry tests (*.t.sol)
+│   ├── script/         # Deployment scripts
+│   └── lib/            # Git submodule deps (forge-std, OZ, account-abstraction, solady)
+├── indexer/            # Go module — EVM event indexer
+│   ├── cmd/indexer/    # Entry point (main.go)
+│   └── internal/       # Internal packages (api/, indexer/, db/)
+├── frontend/           # SvelteKit 2 — shared between both pillars
+│   └── src/lib/        # Utilities, stores, contract ABIs
+├── scripts/            # Build/tooling scripts (export-abis.sh)
+└── Makefile            # Orchestrates all three components
+```
+
+## Prerequisites
+
+- [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
+- [Node.js](https://nodejs.org/) v20+ and [pnpm](https://pnpm.io/) v9+
+- [Go](https://go.dev/) 1.22+
+- PostgreSQL 15+ (for the indexer — not yet implemented)
+
+## Setup
+
+### Contracts
+
+```sh
+cd contracts
+forge build       # Compile
+forge test -vvv   # Run tests
+```
+
+### Frontend
+
+```sh
+cd frontend
+pnpm install
+pnpm dev          # Dev server on http://localhost:5173
+```
+
+### Indexer
+
+```sh
+cd indexer
+go build ./cmd/indexer
+go run ./cmd/indexer   # Starts on http://localhost:3001
+```
+
+### Makefile (all components)
+
+```sh
+make build    # Build contracts + frontend + indexer
+make test     # Run all test suites
+```
+
+## Contracts
+
+| Contract | Description | Status |
+|----------|-------------|--------|
+| `SmartAccount` | ERC-4337 account with ECDSA validation, `execute`/`executeBatch`, proxy-compatible | Implemented |
+| `SmartAccountFactory` | CREATE2 deployment of SmartAccount proxies | Not started |
+| `Counter` | Per-account counters — `increment()`, `getCount(address)` | Not started |
+| `FaucetToken` | ERC-20 with `claim()` faucet | Not started |
+
+**EntryPoint v0.7:** `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
+
+<!-- ## Contract Addresses (Sepolia)
+
+Deployed addresses will be added after Issue #7. -->
+
+<!-- ## Demo Walkthrough
+
+Step-by-step demo guide will be added once the frontend is functional. -->
