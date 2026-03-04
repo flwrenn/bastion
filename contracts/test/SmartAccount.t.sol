@@ -136,6 +136,16 @@ contract SmartAccountTest is Test {
         assertEq(validationData, 1); // SIG_VALIDATION_FAILED
     }
 
+    function test_validateUserOp_malformedSignature() public {
+        PackedUserOperation memory userOp = _buildUserOp("");
+        userOp.signature = hex"dead"; // too short — not a valid 65-byte ECDSA sig
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED, no revert
+    }
+
     function test_validateUserOp_onlyEntryPoint() public {
         PackedUserOperation memory userOp = _buildUserOp("");
         userOp.signature = _signUserOp(userOp, ownerKey);

@@ -84,24 +84,23 @@ contract SmartAccount is BaseAccount, Initializable {
     ///         The flow (called by BaseAccount.validateUserOp):
     ///         1. `userOpHash` is the hash of the UserOp (already includes entryPoint + chainId).
     ///         2. We convert it to an Ethereum Signed Message hash (prepend "\x19Ethereum Signed Message:\n32").
-    ///         3. ECDSA.recover extracts the signer address from the signature.
-    ///         4. If signer == owner → return 0 (success). Otherwise → return 1 (failure, no revert).
+    ///         3. ECDSA.tryRecover extracts the signer — returns an error instead of reverting
+    ///            on malformed signatures (wrong length, invalid s, etc.).
+    ///         4. If any error OR signer != owner → return 1 (SIG_VALIDATION_FAILED, no revert).
     ///
     /// @inheritdoc BaseAccount
     function _validateSignature(
         PackedUserOperation calldata userOp,
         bytes32 userOpHash
     ) internal view override returns (uint256 validationData) {
-        // Convert the raw hash to an eth_sign compatible hash.
-        // This is what wallets (MetaMask) actually sign — they prepend the EIP-191 prefix.
         bytes32 ethSignedHash = userOpHash.toEthSignedMessageHash();
 
-        // Recover the signer. If the signature is invalid, this returns address(0).
-        address recovered = ethSignedHash.recover(userOp.signature);
+        // tryRecover returns (address, RecoverError, bytes32) — never reverts.
+        // recover would revert on malformed sigs, violating the ERC-4337 spec:
+        // validateUserOp must return SIG_VALIDATION_FAILED on bad sigs, not revert.
+        (address recovered, ECDSA.RecoverError err,) = ethSignedHash.tryRecover(userOp.signature);
 
-        // SIG_VALIDATION_FAILED (1) tells the EntryPoint the sig is bad — without reverting.
-        // Reverting would be a hard failure (bad nonce, malformed data), not a sig mismatch.
-        if (recovered != owner) {
+        if (err != ECDSA.RecoverError.NoError || recovered != owner) {
             return SIG_VALIDATION_FAILED;
         }
         return SIG_VALIDATION_SUCCESS;
