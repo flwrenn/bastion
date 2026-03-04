@@ -1,10 +1,8 @@
 # Bastion
 
-ERC-4337 smart account system with session key support and an EVM event indexer,
-sharing a single SvelteKit frontend.
+ERC-4337 smart account system with session key support and an EVM event indexer, sharing a single SvelteKit frontend.
 
-Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2
-(Svelte 5, viem, permissionless.js).
+Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2 (Svelte 5, viem, permissionless.js).
 
 ## Architecture
 
@@ -22,16 +20,11 @@ Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2
 └──────────────┘                                                  └──────────────┘
 ```
 
-**Part 1 — Smart Contracts:** ERC-4337 compliant SmartAccount with ECDSA
-owner validation and session key support, deployed via CREATE2 factory.
-Demo contracts (Counter, FaucetToken) for interaction.
+**Part 1 — Smart Contracts:** ERC-4337 compliant SmartAccount with ECDSA owner validation and session key support, deployed via CREATE2 factory. Demo contracts (Counter, FaucetToken) for interaction.
 
-**Part 2 — EVM Indexer:** Go backend that indexes `UserOperationEvent`
-from EntryPoint v0.7. PostgreSQL persistence, REST API, WebSocket live
-feed.
+**Part 2 — EVM Indexer:** Go backend that indexes `UserOperationEvent` from EntryPoint v0.7, with PostgreSQL persistence, REST API, and WebSocket live feed.
 
-**Shared Frontend:** SvelteKit app for wallet connection, smart account
-deployment, owner and session key interactions, and indexer dashboard.
+**Shared Frontend:** SvelteKit app for wallet connection, smart account deployment, owner and session key interactions, and indexer dashboard.
 
 ## Directory Structure
 
@@ -56,7 +49,7 @@ bastion/
 - [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
 - [Node.js](https://nodejs.org/) v20+ and [pnpm](https://pnpm.io/) v9+
 - [Go](https://go.dev/) 1.25+
-- PostgreSQL 15+ (for the indexer — not yet implemented)
+- [PostgreSQL](https://www.postgresql.org/) 15+
 
 ## Setup
 
