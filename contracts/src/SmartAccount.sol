@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
 import {BaseAccount} from "@account-abstraction/contracts/core/BaseAccount.sol";
