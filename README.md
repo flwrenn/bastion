@@ -23,14 +23,15 @@ Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2
 ```
 
 **Part 1 — Smart Contracts:** ERC-4337 compliant SmartAccount with ECDSA
-owner validation and session keys, deployed via CREATE2 factory. Demo
-contracts (Counter, FaucetToken) for interaction.
+owner validation and session key support, deployed via CREATE2 factory.
+Demo contracts (Counter, FaucetToken) for interaction.
 
-**Part 2 — EVM Indexer:** Go backend indexing `UserOperationEvent` from
-EntryPoint v0.7. PostgreSQL persistence, REST API, WebSocket live feed.
+**Part 2 — EVM Indexer:** Go backend that indexes `UserOperationEvent`
+from EntryPoint v0.7. PostgreSQL persistence, REST API, WebSocket live
+feed.
 
 **Shared Frontend:** SvelteKit app for wallet connection, smart account
-deployment, owner/session key interactions, and indexer dashboard.
+deployment, owner and session key interactions, and indexer dashboard.
 
 ## Directory Structure
 
@@ -94,9 +95,9 @@ make test     # Run all test suites
 
 | Contract | Description | Status |
 |----------|-------------|--------|
-| `SmartAccount` | ERC-4337 account with ECDSA validation, `execute`/`executeBatch`, proxy-compatible | Implemented |
+| `SmartAccount` | ERC-4337 account — ECDSA owner validation, `execute`/`executeBatch`, proxy-compatible | Implemented |
 | `SmartAccountFactory` | CREATE2 deployment of SmartAccount proxies | Not started |
-| `Counter` | Per-account counters — `increment()`, `getCount(address)` | Not started |
+| `Counter` | Scaffold — needs rewrite to per-account spec (`getCount(address)`) | Scaffold |
 | `FaucetToken` | ERC-20 with `claim()` faucet | Not started |
 
 **EntryPoint v0.7:** `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
