@@ -1,6 +1,6 @@
 # Bastion
 
-ERC-4337 smart account system with session keys and an EVM event indexer,
+ERC-4337 smart account system with session key support and an EVM event indexer,
 sharing a single SvelteKit frontend.
 
 Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2
@@ -55,7 +55,7 @@ bastion/
 
 - [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
 - [Node.js](https://nodejs.org/) v20+ and [pnpm](https://pnpm.io/) v9+
-- [Go](https://go.dev/) 1.22+
+- [Go](https://go.dev/) 1.25+
 - PostgreSQL 15+ (for the indexer — not yet implemented)
 
 ## Setup
