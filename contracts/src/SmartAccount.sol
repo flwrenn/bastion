@@ -4,15 +4,14 @@ pragma solidity ^0.8.28;
 import {BaseAccount} from "@account-abstraction/contracts/core/BaseAccount.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
-import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
+import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS, _packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 
 /// @title SmartAccount
-/// @notice ERC-4337 compliant smart account with ECDSA owner validation.
+/// @notice ERC-4337 compliant smart account with ECDSA owner validation and session keys.
 ///         Designed to be deployed as a proxy via SmartAccountFactory (CREATE2).
-///         Session key support will be added in a subsequent issue.
 contract SmartAccount is BaseAccount, Initializable {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -26,15 +25,38 @@ contract SmartAccount is BaseAccount, Initializable {
     ///         and shared across all proxies (lives in the implementation, not storage).
     IEntryPoint private immutable _ENTRY_POINT;
 
+    /// @notice Configuration for a session key — scoped, time-bounded execution rights.
+    struct SessionKeyData {
+        address allowedTarget;
+        bytes4 allowedSelector;
+        uint48 validAfter;
+        uint48 validUntil;
+    }
+
+    /// @notice Registered session keys. A key with `validUntil == 0` is not registered.
+    mapping(address => SessionKeyData) public sessionKeys;
+
     // ───────────────────────────── Events ──────────────────────────────
 
-    event SmartAccountInitialized(IEntryPoint indexed entryPoint, address indexed owner);
+    event SmartAccountInitialized(
+        IEntryPoint indexed entryPoint,
+        address indexed owner
+    );
+
+    /// @notice Emitted when the owner registers a new session key (exam spec name).
+    event SessionKeyAdded(address indexed key, uint256 expiry);
+
+    /// @notice Emitted when the owner revokes a session key (exam spec name).
+    event SessionKeyRevoked(address indexed key);
 
     // ───────────────────────────── Errors ──────────────────────────────
 
     error OnlyOwnerOrEntryPoint();
     error OnlyOwner();
     error CallFailed(bytes returnData);
+    error SessionKeyAlreadyRegistered(address key);
+    error SessionKeyNotRegistered(address key);
+    error InvalidSessionKeyParams();
 
     // ───────────────────────────── Modifiers ───────────────────────────
 
@@ -44,7 +66,6 @@ contract SmartAccount is BaseAccount, Initializable {
         _;
     }
 
-    /// @notice Restricts to the owner only.
     modifier onlyOwner() {
         _checkOwner();
         _;
@@ -78,15 +99,17 @@ contract SmartAccount is BaseAccount, Initializable {
         return _ENTRY_POINT;
     }
 
-    /// @notice Validates the UserOperation signature.
-    ///         Recovers the signer from the signature and checks it matches the owner.
+    /// @notice Validates the UserOperation signature against the owner or a session key.
     ///
-    ///         The flow (called by BaseAccount.validateUserOp):
-    ///         1. `userOpHash` is the hash of the UserOp (already includes entryPoint + chainId).
-    ///         2. We convert it to an Ethereum Signed Message hash (prepend "\x19Ethereum Signed Message:\n32").
-    ///         3. ECDSA.tryRecover extracts the signer — returns an error instead of reverting
-    ///            on malformed signatures (wrong length, invalid s, etc.).
-    ///         4. If any error OR signer != owner → return 1 (SIG_VALIDATION_FAILED, no revert).
+    ///         Flow:
+    ///         1. Recover the signer from the signature (tryRecover — never reverts).
+    ///         2. If signer == owner → return success (owner can do anything).
+    ///         3. If signer is a registered session key → parse userOp.callData to enforce
+    ///            target + selector restrictions, return packed validationData with time bounds.
+    ///         4. Otherwise → return SIG_VALIDATION_FAILED.
+    ///
+    ///         Session key enforcement happens here (not in execute) because userOp.callData
+    ///         is signed — it cannot be tampered with between validation and execution.
     ///
     /// @inheritdoc BaseAccount
     function _validateSignature(
@@ -95,15 +118,60 @@ contract SmartAccount is BaseAccount, Initializable {
     ) internal view override returns (uint256 validationData) {
         bytes32 ethSignedHash = userOpHash.toEthSignedMessageHash();
 
-        // tryRecover returns (address, RecoverError, bytes32) — never reverts.
-        // recover would revert on malformed sigs, violating the ERC-4337 spec:
-        // validateUserOp must return SIG_VALIDATION_FAILED on bad sigs, not revert.
-        (address recovered, ECDSA.RecoverError err,) = ethSignedHash.tryRecover(userOp.signature);
-
-        if (err != ECDSA.RecoverError.NoError || recovered != owner) {
+        (address recovered, ECDSA.RecoverError err, ) = ethSignedHash
+            .tryRecover(userOp.signature);
+        if (err != ECDSA.RecoverError.NoError) {
             return SIG_VALIDATION_FAILED;
         }
-        return SIG_VALIDATION_SUCCESS;
+
+        if (recovered == owner) {
+            return SIG_VALIDATION_SUCCESS;
+        }
+
+        return _validateSessionKey(recovered, userOp.callData);
+    }
+
+    // ──────────────────── Session key management ───────────────────────
+
+    /// @notice Register a new session key. Only the owner can call this.
+    /// @param key             The session key address (will sign UserOps).
+    /// @param allowedTarget   The contract this key may call.
+    /// @param allowedSelector The function selector this key may invoke.
+    /// @param validAfter      Timestamp after which the key is active.
+    /// @param validUntil      Timestamp after which the key expires. Must be > 0.
+    function registerSessionKey(
+        address key,
+        address allowedTarget,
+        bytes4 allowedSelector,
+        uint48 validAfter,
+        uint48 validUntil
+    ) external onlyOwner {
+        if (key == address(0) || validUntil == 0 || validUntil <= validAfter) {
+            revert InvalidSessionKeyParams();
+        }
+        if (sessionKeys[key].validUntil != 0) {
+            revert SessionKeyAlreadyRegistered(key);
+        }
+
+        sessionKeys[key] = SessionKeyData({
+            allowedTarget: allowedTarget,
+            allowedSelector: allowedSelector,
+            validAfter: validAfter,
+            validUntil: validUntil
+        });
+
+        emit SessionKeyAdded(key, validUntil);
+    }
+
+    /// @notice Revoke a session key. Only the owner can call this.
+    /// @param key The session key address to revoke.
+    function revokeSessionKey(address key) external onlyOwner {
+        if (sessionKeys[key].validUntil == 0) {
+            revert SessionKeyNotRegistered(key);
+        }
+
+        delete sessionKeys[key];
+        emit SessionKeyRevoked(key);
     }
 
     // ──────────────────────────── Execution ────────────────────────────
@@ -114,8 +182,14 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @param target  The contract (or EOA) to call.
     /// @param value   The ETH value to send.
     /// @param data    The calldata (function selector + arguments).
-    function execute(address target, uint256 value, bytes calldata data) external onlyOwnerOrEntryPoint {
-        (bool success, bytes memory returnData) = target.call{value: value}(data);
+    function execute(
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) external onlyOwnerOrEntryPoint {
+        (bool success, bytes memory returnData) = target.call{value: value}(
+            data
+        );
         if (!success) {
             revert CallFailed(returnData);
         }
@@ -131,9 +205,15 @@ contract SmartAccount is BaseAccount, Initializable {
         uint256[] calldata values,
         bytes[] calldata calldatas
     ) external onlyOwnerOrEntryPoint {
-        require(targets.length == values.length && values.length == calldatas.length, "length mismatch");
+        require(
+            targets.length == values.length &&
+                values.length == calldatas.length,
+            "length mismatch"
+        );
         for (uint256 i = 0; i < targets.length; i++) {
-            (bool success, bytes memory returnData) = targets[i].call{value: values[i]}(calldatas[i]);
+            (bool success, bytes memory returnData) = targets[i].call{
+                value: values[i]
+            }(calldatas[i]);
             if (!success) {
                 revert CallFailed(returnData);
             }
@@ -147,6 +227,61 @@ contract SmartAccount is BaseAccount, Initializable {
     receive() external payable {}
 
     // ──────────────────────── Internal helpers ─────────────────────────
+
+    /// @notice Validates a session key's permissions by parsing userOp.callData.
+    ///
+    ///         callData layout for execute(address,uint256,bytes):
+    ///         [0:4]   — execute selector (0xb61d27f6)
+    ///         [4:36]  — target address (left-padded to 32 bytes)
+    ///         [36:68] — value (uint256)
+    ///         [68:100] — offset to bytes data
+    ///         [100:132] — length of bytes data
+    ///         [132:136] — inner function selector (first 4 bytes of data)
+    ///
+    /// @param signer  The recovered session key address.
+    /// @param callData The full userOp.callData.
+    /// @return validationData Packed (sigFailed, validUntil, validAfter) or SIG_VALIDATION_FAILED.
+    function _validateSessionKey(
+        address signer,
+        bytes calldata callData
+    ) internal view returns (uint256) {
+        SessionKeyData storage sk = sessionKeys[signer];
+
+        if (sk.validUntil == 0) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        // Session keys can only call execute — not executeBatch or anything else
+        if (
+            callData.length < 4 || bytes4(callData[:4]) != this.execute.selector
+        ) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        if (callData.length < 100) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        address target = address(bytes20(callData[16:36]));
+
+        if (target != sk.allowedTarget) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        if (callData.length >= 136) {
+            bytes4 innerSelector = bytes4(callData[132:136]);
+            if (innerSelector != sk.allowedSelector) {
+                return SIG_VALIDATION_FAILED;
+            }
+        } else {
+            // No inner calldata (empty data) — fail if a selector restriction is set
+            if (sk.allowedSelector != bytes4(0)) {
+                return SIG_VALIDATION_FAILED;
+            }
+        }
+
+        return _packValidationData(false, sk.validUntil, sk.validAfter);
+    }
 
     function _checkOwnerOrEntryPoint() internal view {
         if (msg.sender != address(entryPoint()) && msg.sender != owner) {

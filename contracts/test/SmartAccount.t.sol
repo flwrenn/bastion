@@ -223,4 +223,357 @@ contract SmartAccountTest is Test {
         assertTrue(success);
         assertEq(address(account).balance, balanceBefore + 0.5 ether);
     }
+
+    // ───────────────── Session key registration tests ─────────────────
+
+    function test_registerSessionKey_emitsEvent() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.expectEmit(true, false, false, true);
+        emit SmartAccount.SessionKeyAdded(sessionKey, 2000);
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
+    function test_registerSessionKey_storesData() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        (address target, bytes4 selector, uint48 validAfter, uint48 validUntil) = account.sessionKeys(sessionKey);
+        assertEq(target, address(counter));
+        assertEq(selector, Counter.increment.selector);
+        assertEq(validAfter, 1000);
+        assertEq(validUntil, 2000);
+    }
+
+    function test_registerSessionKey_revertsZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
+        account.registerSessionKey(
+            address(0),
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
+    function test_registerSessionKey_revertsZeroValidUntil() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(0)
+        );
+    }
+
+    function test_registerSessionKey_revertsValidUntilLteValidAfter() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(2000),
+            uint48(2000) // equal — should fail
+        );
+    }
+
+    function test_registerSessionKey_revertsDuplicate() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(SmartAccount.SessionKeyAlreadyRegistered.selector, sessionKey));
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
+    function test_registerSessionKey_revertsFromStranger() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(stranger);
+        vm.expectRevert(SmartAccount.OnlyOwner.selector);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
+    // ─────────────────── Session key revocation tests ─────────────────
+
+    function test_revokeSessionKey_emitsEvent() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        vm.expectEmit(true, false, false, false);
+        emit SmartAccount.SessionKeyRevoked(sessionKey);
+
+        vm.prank(owner);
+        account.revokeSessionKey(sessionKey);
+    }
+
+    function test_revokeSessionKey_deletesData() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        vm.prank(owner);
+        account.revokeSessionKey(sessionKey);
+
+        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        assertEq(validUntil, 0);
+    }
+
+    function test_revokeSessionKey_revertsIfNotRegistered() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(SmartAccount.SessionKeyNotRegistered.selector, stranger));
+        account.revokeSessionKey(stranger);
+    }
+
+    function test_revokeSessionKey_revertsFromStranger() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        vm.prank(stranger);
+        vm.expectRevert(SmartAccount.OnlyOwner.selector);
+        account.revokeSessionKey(sessionKey);
+    }
+
+    // ──────────────── Session key validation tests (unit) ─────────────
+
+    function test_validateUserOp_sessionKey_validOp() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+
+        assertNotEq(validationData, 0);
+        assertNotEq(validationData, 1);
+
+        // Decode: lowest 160 bits = aggregator (0), next 48 bits = validUntil, next 48 bits = validAfter
+        uint48 validUntil = uint48(validationData >> 160);
+        uint48 validAfter = uint48(validationData >> 208);
+        assertEq(validUntil, 5000);
+        assertEq(validAfter, 100);
+    }
+
+    function test_validateUserOp_sessionKey_wrongTarget() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+        address wrongTarget = makeAddr("wrongTarget");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (wrongTarget, 0, abi.encodeCall(Counter.increment, ()))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_wrongSelector() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector, // only increment allowed
+            uint48(100),
+            uint48(5000)
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (address(counter), 0, abi.encodeCall(Counter.setNumber, (42)))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_executeBatchRejected() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        address[] memory targets = new address[](1);
+        targets[0] = address(counter);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory calldatas = new bytes[](1);
+        calldatas[0] = abi.encodeCall(Counter.increment, ());
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.executeBatch,
+            (targets, values, calldatas)
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_revokedKeyFails() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        vm.prank(owner);
+        account.revokeSessionKey(sessionKey);
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    // ──────────── Session key full EntryPoint flow test ───────────────
+
+    function test_execute_sessionKey_fullFlow() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        uint48 validAfter = uint48(block.timestamp);
+        uint48 validUntil = uint48(block.timestamp + 1 hours);
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            validAfter,
+            validUntil
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        assertEq(counter.number(), 1);
+    }
 }
