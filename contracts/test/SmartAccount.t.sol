@@ -638,6 +638,41 @@ contract SmartAccountTest is Test {
         assertEq(validationData, 1); // SIG_VALIDATION_FAILED
     }
 
+    function test_validateUserOp_sessionKey_zeroDataLength() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        // Craft calldata where data.length is 0 but trailing bytes contain the
+        // allowed selector at [132:136]. Without the dataLen check, our validation
+        // would read the trailing bytes and pass, while execute would forward empty
+        // calldata (hitting the target's fallback instead of increment).
+        bytes memory malicious = abi.encodePacked(
+            SmartAccount.execute.selector,               // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
+            bytes32(uint256(0)),                          // [36:68] value
+            bytes32(uint256(0x60)),                       // [68:100] canonical offset
+            bytes32(uint256(0)),                          // [100:132] data.length = 0
+            Counter.increment.selector,                   // [132:136] trailing decoy
+            bytes28(0)                                    // [136:164] padding
+        );
+
+        PackedUserOperation memory userOp = _buildUserOp(malicious);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
     // ──────────── Session key full EntryPoint flow test ───────────────
 
     function test_execute_sessionKey_fullFlow() public {
