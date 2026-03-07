@@ -52,7 +52,6 @@ contract SmartAccount is BaseAccount, Initializable {
     // ───────────────────────────── Errors ──────────────────────────────
 
     error OnlyOwnerOrEntryPoint();
-    error OnlyOwner();
     error CallFailed(bytes returnData);
     error SessionKeyAlreadyRegistered(address key);
     error SessionKeyNotRegistered(address key);
@@ -63,11 +62,6 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @notice Restricts to the EntryPoint (during UserOp execution) or the owner (direct calls).
     modifier onlyOwnerOrEntryPoint() {
         _checkOwnerOrEntryPoint();
-        _;
-    }
-
-    modifier onlyOwner() {
-        _checkOwner();
         _;
     }
 
@@ -272,10 +266,9 @@ contract SmartAccount is BaseAccount, Initializable {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Session keys can only call execute — not executeBatch or anything else.
-        // Minimum length: 4 (selector) + 3×32 (head) + 32 (data length) + 4 (inner selector) = 136.
-        // Anything shorter would cause out-of-bounds reads below, reverting instead of
-        // returning SIG_VALIDATION_FAILED (which violates the ERC-4337 spec).
+        // Min 136 bytes: 4 (selector) + 3×32 (head) + 32 (data length) + 4 (inner selector).
+        // Shorter calldata would cause OOB reads, reverting instead of returning
+        // SIG_VALIDATION_FAILED (violating ERC-4337).
         if (
             callData.length < 136 ||
             bytes4(callData[:4]) != this.execute.selector
@@ -289,27 +282,18 @@ contract SmartAccount is BaseAccount, Initializable {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Session keys cannot transfer ETH — enforce value == 0.
         if (uint256(bytes32(callData[36:68])) != 0) {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Reject non-canonical ABI encoding. The dynamic `bytes` offset must be
-        // exactly 0x60 (96) for execute(address,uint256,bytes) — three 32-byte
-        // head slots. A different offset would let an attacker place the allowed
-        // selector at [132:136] while Solidity decodes from a different position.
+        // Canonical offset only — non-canonical offsets let an attacker place the
+        // allowed selector at [132:136] while Solidity decodes from elsewhere.
         if (uint256(bytes32(callData[68:100])) != 0x60) {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Validate the ABI-encoded data length. Without this check, an attacker
-        // could set data.length to 0 while appending trailing bytes past position 132.
-        // Our selector check would read the trailing bytes and pass, but Solidity's
-        // abi.decode would see length 0 and forward empty calldata to the target
-        // (hitting its fallback/receive instead of the allowed function).
-        // Use (callData.length - 132) instead of (132 + dataLen) to avoid overflow
-        // if dataLen is a huge value (e.g. type(uint256).max). The subtraction is
-        // safe because callData.length >= 136 is guaranteed by the check above.
+        // Subtraction avoids overflow when dataLen is huge (e.g. type(uint256).max).
+        // Safe because callData.length >= 136 is guaranteed above.
         uint256 dataLen = uint256(bytes32(callData[100:132]));
         if (dataLen < 4 || dataLen > callData.length - 132) {
             return SIG_VALIDATION_FAILED;
@@ -326,12 +310,6 @@ contract SmartAccount is BaseAccount, Initializable {
     function _checkOwnerOrEntryPoint() internal view {
         if (msg.sender != address(entryPoint()) && msg.sender != owner) {
             revert OnlyOwnerOrEntryPoint();
-        }
-    }
-
-    function _checkOwner() internal view {
-        if (msg.sender != owner) {
-            revert OnlyOwner();
         }
     }
 }
