@@ -249,6 +249,9 @@ contract SmartAccount is BaseAccount, Initializable {
     ///           would let an attacker place the allowed selector where we check while
     ///           encoding a different selector where Solidity actually decodes.
     ///         - Value must be 0. Session keys cannot transfer ETH.
+    ///         - data.length (at [100:132]) must be >= 4 and callData must be long enough
+    ///           to contain it. Otherwise an attacker could set length to 0, append trailing
+    ///           bytes with the allowed selector, and have execute forward empty calldata.
     ///
     /// @param signer  The recovered session key address.
     /// @param callData The full userOp.callData.
@@ -291,14 +294,18 @@ contract SmartAccount is BaseAccount, Initializable {
             return SIG_VALIDATION_FAILED;
         }
 
-        if (callData.length >= 136) {
-            bytes4 innerSelector = bytes4(callData[132:136]);
-            if (innerSelector != sk.allowedSelector) {
-                return SIG_VALIDATION_FAILED;
-            }
-        } else {
-            // No inner calldata (empty data) — always fail since session keys
-            // must target a specific selector (zero selectors rejected at registration).
+        // Validate the ABI-encoded data length. Without this check, an attacker
+        // could set data.length to 0 while appending trailing bytes past position 132.
+        // Our selector check would read the trailing bytes and pass, but Solidity's
+        // abi.decode would see length 0 and forward empty calldata to the target
+        // (hitting its fallback/receive instead of the allowed function).
+        uint256 dataLen = uint256(bytes32(callData[100:132]));
+        if (dataLen < 4 || callData.length < 132 + dataLen) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        bytes4 innerSelector = bytes4(callData[132:136]);
+        if (innerSelector != sk.allowedSelector) {
             return SIG_VALIDATION_FAILED;
         }
 
