@@ -273,6 +273,34 @@ contract SmartAccountTest is Test {
         );
     }
 
+    function test_registerSessionKey_revertsZeroTarget() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
+        account.registerSessionKey(
+            sessionKey,
+            address(0),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
+    function test_registerSessionKey_revertsZeroSelector() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            bytes4(0),
+            uint48(1000),
+            uint48(2000)
+        );
+    }
+
     function test_registerSessionKey_revertsZeroValidUntil() public {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
@@ -536,6 +564,70 @@ contract SmartAccountTest is Test {
         bytes memory callData = abi.encodeCall(
             SmartAccount.execute,
             (address(counter), 0, abi.encodeCall(Counter.increment, ()))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_nonCanonicalOffset() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        // Craft calldata with non-canonical ABI offset.
+        // Normal execute(address,uint256,bytes) has offset 0x60 at [68:100].
+        // We set offset to 0xA0, place the allowed selector at [132:136] to
+        // fool a naive fixed-offset check, and put the real (malicious) data
+        // where Solidity's abi.decode would actually read it.
+        bytes memory malicious = abi.encodePacked(
+            SmartAccount.execute.selector,     // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))), // [4:36]  target
+            bytes32(uint256(0)),                // [36:68] value
+            bytes32(uint256(0xA0)),             // [68:100] non-canonical offset
+            bytes32(0),                         // [100:132] padding
+            Counter.increment.selector,         // [132:136] decoy selector
+            bytes28(0),                         // [136:164] padding
+            bytes32(uint256(4)),                // [164:196] length of inner data
+            Counter.setNumber.selector,         // [196:200] actual malicious selector
+            bytes28(0)                          // [200:228] padding
+        );
+
+        PackedUserOperation memory userOp = _buildUserOp(malicious);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_nonZeroValue() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.execute,
+            (address(counter), 1 ether, abi.encodeCall(Counter.increment, ()))
         );
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);

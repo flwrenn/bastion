@@ -146,7 +146,13 @@ contract SmartAccount is BaseAccount, Initializable {
         uint48 validAfter,
         uint48 validUntil
     ) external onlyOwner {
-        if (key == address(0) || validUntil == 0 || validUntil <= validAfter) {
+        if (
+            key == address(0) ||
+            allowedTarget == address(0) ||
+            allowedSelector == bytes4(0) ||
+            validUntil == 0 ||
+            validUntil <= validAfter
+        ) {
             revert InvalidSessionKeyParams();
         }
         if (sessionKeys[key].validUntil != 0) {
@@ -231,12 +237,18 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @notice Validates a session key's permissions by parsing userOp.callData.
     ///
     ///         callData layout for execute(address,uint256,bytes):
-    ///         [0:4]   — execute selector (0xb61d27f6)
-    ///         [4:36]  — target address (left-padded to 32 bytes)
-    ///         [36:68] — value (uint256)
-    ///         [68:100] — offset to bytes data
+    ///         [0:4]     — execute selector (0xb61d27f6)
+    ///         [4:36]    — target address (left-padded to 32 bytes)
+    ///         [36:68]   — value (uint256)
+    ///         [68:100]  — offset to bytes data (must be 0x60 for canonical encoding)
     ///         [100:132] — length of bytes data
     ///         [132:136] — inner function selector (first 4 bytes of data)
+    ///
+    ///         Security invariants:
+    ///         - Offset must equal 0x60 (canonical ABI encoding). Non-canonical offsets
+    ///           would let an attacker place the allowed selector where we check while
+    ///           encoding a different selector where Solidity actually decodes.
+    ///         - Value must be 0. Session keys cannot transfer ETH.
     ///
     /// @param signer  The recovered session key address.
     /// @param callData The full userOp.callData.
@@ -251,14 +263,12 @@ contract SmartAccount is BaseAccount, Initializable {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Session keys can only call execute — not executeBatch or anything else
+        // Session keys can only call execute — not executeBatch or anything else.
+        // Minimum length: 4 (selector) + 3×32 (head) = 100 bytes.
         if (
-            callData.length < 4 || bytes4(callData[:4]) != this.execute.selector
+            callData.length < 100 ||
+            bytes4(callData[:4]) != this.execute.selector
         ) {
-            return SIG_VALIDATION_FAILED;
-        }
-
-        if (callData.length < 100) {
             return SIG_VALIDATION_FAILED;
         }
 
@@ -268,16 +278,28 @@ contract SmartAccount is BaseAccount, Initializable {
             return SIG_VALIDATION_FAILED;
         }
 
+        // Session keys cannot transfer ETH — enforce value == 0.
+        if (uint256(bytes32(callData[36:68])) != 0) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        // Reject non-canonical ABI encoding. The dynamic `bytes` offset must be
+        // exactly 0x60 (96) for execute(address,uint256,bytes) — three 32-byte
+        // head slots. A different offset would let an attacker place the allowed
+        // selector at [132:136] while Solidity decodes from a different position.
+        if (uint256(bytes32(callData[68:100])) != 0x60) {
+            return SIG_VALIDATION_FAILED;
+        }
+
         if (callData.length >= 136) {
             bytes4 innerSelector = bytes4(callData[132:136]);
             if (innerSelector != sk.allowedSelector) {
                 return SIG_VALIDATION_FAILED;
             }
         } else {
-            // No inner calldata (empty data) — fail if a selector restriction is set
-            if (sk.allowedSelector != bytes4(0)) {
-                return SIG_VALIDATION_FAILED;
-            }
+            // No inner calldata (empty data) — always fail since session keys
+            // must target a specific selector (zero selectors rejected at registration).
+            return SIG_VALIDATION_FAILED;
         }
 
         return _packValidationData(false, sk.validUntil, sk.validAfter);
