@@ -356,7 +356,7 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(stranger);
-        vm.expectRevert(SmartAccount.OnlyOwner.selector);
+        vm.expectRevert(SmartAccount.OnlyOwnerOrEntryPoint.selector);
         account.registerSessionKey(
             sessionKey,
             address(counter),
@@ -364,6 +364,24 @@ contract SmartAccountTest is Test {
             uint48(1000),
             uint48(2000)
         );
+    }
+
+    function test_registerSessionKey_viaEntryPoint() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.registerSessionKey,
+            (sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000))
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, ownerKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        assertEq(validUntil, 2000);
     }
 
     // ─────────────────── Session key revocation tests ─────────────────
@@ -425,8 +443,35 @@ contract SmartAccountTest is Test {
         );
 
         vm.prank(stranger);
-        vm.expectRevert(SmartAccount.OnlyOwner.selector);
+        vm.expectRevert(SmartAccount.OnlyOwnerOrEntryPoint.selector);
         account.revokeSessionKey(sessionKey);
+    }
+
+    function test_revokeSessionKey_viaEntryPoint() public {
+        (address sessionKey,) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(1000),
+            uint48(2000)
+        );
+
+        bytes memory callData = abi.encodeCall(
+            SmartAccount.revokeSessionKey,
+            (sessionKey)
+        );
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, ownerKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        assertEq(validUntil, 0);
     }
 
     // ──────────────── Session key validation tests (unit) ─────────────

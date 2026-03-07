@@ -133,7 +133,11 @@ contract SmartAccount is BaseAccount, Initializable {
 
     // ──────────────────── Session key management ───────────────────────
 
-    /// @notice Register a new session key. Only the owner can call this.
+    /// @notice Register a new session key. Callable by the owner directly or
+    ///         via the EntryPoint (owner-signed UserOp). Session keys cannot
+    ///         reach this function: _validateSessionKey requires the outer call
+    ///         to be execute(), and a self-call via execute has msg.sender =
+    ///         address(this), which fails the modifier.
     /// @param key             The session key address (will sign UserOps).
     /// @param allowedTarget   The contract this key may call.
     /// @param allowedSelector The function selector this key may invoke.
@@ -145,7 +149,7 @@ contract SmartAccount is BaseAccount, Initializable {
         bytes4 allowedSelector,
         uint48 validAfter,
         uint48 validUntil
-    ) external onlyOwner {
+    ) external onlyOwnerOrEntryPoint {
         if (
             key == address(0) ||
             allowedTarget == address(0) ||
@@ -169,9 +173,11 @@ contract SmartAccount is BaseAccount, Initializable {
         emit SessionKeyAdded(key, validUntil);
     }
 
-    /// @notice Revoke a session key. Only the owner can call this.
+    /// @notice Revoke a session key. Callable by the owner directly or via the
+    ///         EntryPoint (owner-signed UserOp). Same security rationale as
+    ///         registerSessionKey — session keys cannot reach this function.
     /// @param key The session key address to revoke.
-    function revokeSessionKey(address key) external onlyOwner {
+    function revokeSessionKey(address key) external onlyOwnerOrEntryPoint {
         if (sessionKeys[key].validUntil == 0) {
             revert SessionKeyNotRegistered(key);
         }
