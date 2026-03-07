@@ -673,6 +673,71 @@ contract SmartAccountTest is Test {
         assertEq(validationData, 1); // SIG_VALIDATION_FAILED
     }
 
+    function test_validateUserOp_sessionKey_truncatedCallData() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        // Craft calldata that is 100 bytes — long enough to pass a naive >= 100
+        // check but too short for the [100:132] slice. Must return
+        // SIG_VALIDATION_FAILED, not revert.
+        bytes memory truncated = abi.encodePacked(
+            SmartAccount.execute.selector,               // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
+            bytes32(uint256(0)),                          // [36:68] value
+            bytes32(uint256(0x60))                        // [68:100] canonical offset
+            // nothing beyond 100 — triggers OOB without the length fix
+        );
+
+        PackedUserOperation memory userOp = _buildUserOp(truncated);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED, no revert
+    }
+
+    function test_validateUserOp_sessionKey_hugeDataLen() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(counter),
+            Counter.increment.selector,
+            uint48(100),
+            uint48(5000)
+        );
+
+        // Craft calldata with a huge data.length that would overflow 132 + dataLen.
+        // Must return SIG_VALIDATION_FAILED, not revert with arithmetic overflow.
+        bytes memory malicious = abi.encodePacked(
+            SmartAccount.execute.selector,               // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
+            bytes32(uint256(0)),                          // [36:68] value
+            bytes32(uint256(0x60)),                       // [68:100] canonical offset
+            bytes32(type(uint256).max),                   // [100:132] huge dataLen
+            Counter.increment.selector,                   // [132:136] inner selector
+            bytes28(0)                                    // [136:164] padding
+        );
+
+        PackedUserOperation memory userOp = _buildUserOp(malicious);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED, no revert
+    }
+
     // ──────────── Session key full EntryPoint flow test ───────────────
 
     function test_execute_sessionKey_fullFlow() public {
