@@ -267,9 +267,11 @@ contract SmartAccount is BaseAccount, Initializable {
         }
 
         // Session keys can only call execute — not executeBatch or anything else.
-        // Minimum length: 4 (selector) + 3×32 (head) = 100 bytes.
+        // Minimum length: 4 (selector) + 3×32 (head) + 32 (data length) + 4 (inner selector) = 136.
+        // Anything shorter would cause out-of-bounds reads below, reverting instead of
+        // returning SIG_VALIDATION_FAILED (which violates the ERC-4337 spec).
         if (
-            callData.length < 100 ||
+            callData.length < 136 ||
             bytes4(callData[:4]) != this.execute.selector
         ) {
             return SIG_VALIDATION_FAILED;
@@ -299,8 +301,11 @@ contract SmartAccount is BaseAccount, Initializable {
         // Our selector check would read the trailing bytes and pass, but Solidity's
         // abi.decode would see length 0 and forward empty calldata to the target
         // (hitting its fallback/receive instead of the allowed function).
+        // Use (callData.length - 132) instead of (132 + dataLen) to avoid overflow
+        // if dataLen is a huge value (e.g. type(uint256).max). The subtraction is
+        // safe because callData.length >= 136 is guaranteed by the check above.
         uint256 dataLen = uint256(bytes32(callData[100:132]));
-        if (dataLen < 4 || callData.length < 132 + dataLen) {
+        if (dataLen < 4 || dataLen > callData.length - 132) {
             return SIG_VALIDATION_FAILED;
         }
 
