@@ -170,13 +170,13 @@ contract SmartAccountTest is Test {
         ops[0] = userOp;
         entryPoint.handleOps(ops, beneficiary);
 
-        assertEq(counter.number(), 1);
+        assertEq(counter.getCount(address(account)), 1);
     }
 
     function test_execute_fromOwner() public {
         vm.prank(owner);
         account.execute(address(counter), 0, abi.encodeCall(Counter.increment, ()));
-        assertEq(counter.number(), 1);
+        assertEq(counter.getCount(address(account)), 1);
     }
 
     function test_execute_revertsFromStranger() public {
@@ -198,7 +198,7 @@ contract SmartAccountTest is Test {
 
         vm.prank(owner);
         account.executeBatch(targets, values, calldatas);
-        assertEq(counter.number(), 2);
+        assertEq(counter.getCount(address(account)), 2);
     }
 
     function test_executeBatch_revertsOnLengthMismatch() public {
@@ -811,6 +811,6 @@ contract SmartAccountTest is Test {
         ops[0] = userOp;
         entryPoint.handleOps(ops, beneficiary);
 
-        assertEq(counter.number(), 1);
+        assertEq(counter.getCount(address(account)), 1);
     }
 }
