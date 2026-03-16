@@ -52,6 +52,7 @@ contract SmartAccount is BaseAccount, Initializable {
 
     // ───────────────────────────── Errors ──────────────────────────────
 
+    error InvalidEntryPoint();
     error OnlyOwnerOrEntryPoint();
     error CallFailed(bytes returnData);
     error SessionKeyAlreadyRegistered(address key);
@@ -73,6 +74,7 @@ contract SmartAccount is BaseAccount, Initializable {
     ///         on the implementation itself — only proxies can be initialized.
     /// @param entryPoint_ The EntryPoint v0.7 address (same on all EVM chains).
     constructor(IEntryPoint entryPoint_) {
+        if (address(entryPoint_) == address(0)) revert InvalidEntryPoint();
         _ENTRY_POINT = entryPoint_;
         _disableInitializers();
     }
