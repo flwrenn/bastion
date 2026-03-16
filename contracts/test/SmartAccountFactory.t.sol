@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
-import {Test, Vm} from "forge-std/Test.sol";
-import {VmSafe} from "forge-std/Vm.sol";
+import {Test} from "forge-std/Test.sol";
 import {EntryPoint} from "@account-abstraction/contracts/core/EntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {SmartAccount} from "../src/SmartAccount.sol";
@@ -92,14 +91,11 @@ contract SmartAccountFactoryTest is Test {
     function test_createAccount_noEventOnExistingAccount() public {
         factory.createAccount(owner, 0);
 
-        // Second call should not emit AccountCreated.
+        // Second call returns early — no logs at all.
         vm.recordLogs();
         factory.createAccount(owner, 0);
 
-        VmSafe.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 i = 0; i < logs.length; i++) {
-            assertTrue(logs[i].topics[0] != SmartAccountFactory.AccountCreated.selector);
-        }
+        assertEq(vm.getRecordedLogs().length, 0);
     }
 
     // ────────────────────── getAddress tests ──────────────────────────
