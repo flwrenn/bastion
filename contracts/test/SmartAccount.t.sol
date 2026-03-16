@@ -107,6 +107,11 @@ contract SmartAccountTest is Test {
         new ERC1967Proxy(address(impl), initData);
     }
 
+    function test_constructor_revertsOnZeroEntryPoint() public {
+        vm.expectRevert(SmartAccount.InvalidEntryPoint.selector);
+        new SmartAccount(IEntryPoint(address(0)));
+    }
+
     // ───────────────── Signature validation tests ─────────────────────
 
     function test_validateUserOp_validOwnerSignature() public {
