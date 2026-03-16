@@ -635,7 +635,7 @@ contract SmartAccountTest is Test {
         assertEq(validationData, 1); // SIG_VALIDATION_FAILED, no revert
     }
 
-    // ──────────── Session key full EntryPoint flow test ───────────────
+    // ──────────── Session key full EntryPoint flow tests ──────────────
 
     function test_execute_sessionKey_fullFlow() public {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
@@ -656,5 +656,225 @@ contract SmartAccountTest is Test {
         entryPoint.handleOps(ops, beneficiary);
 
         assertEq(counter.getCount(address(account)), 1);
+    }
+
+    function test_execute_sessionKey_expiredKeyRejected() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        uint48 validAfter = uint48(100);
+        uint48 validUntil = uint48(200);
+
+        vm.warp(150); // within valid window for registration
+        vm.prank(owner);
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, validAfter, validUntil);
+
+        // Move past expiry
+        vm.warp(300);
+
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+
+        vm.expectRevert(abi.encodeWithSelector(IEntryPoint.FailedOp.selector, 0, "AA22 expired or not due"));
+        entryPoint.handleOps(ops, beneficiary);
+    }
+
+    function test_execute_sessionKey_notYetValidRejected() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        uint48 validAfter = uint48(1000);
+        uint48 validUntil = uint48(2000);
+
+        vm.prank(owner);
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, validAfter, validUntil);
+
+        // Stay before validAfter
+        vm.warp(500);
+
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+
+        vm.expectRevert(abi.encodeWithSelector(IEntryPoint.FailedOp.selector, 0, "AA22 expired or not due"));
+        entryPoint.handleOps(ops, beneficiary);
+    }
+
+    function test_execute_sessionKey_multipleKeysIndependent() public {
+        (address keyA, uint256 privA) = makeAddrAndKey("keyA");
+        (address keyB, uint256 privB) = makeAddrAndKey("keyB");
+
+        uint48 validAfter = uint48(block.timestamp);
+        uint48 validUntil = uint48(block.timestamp + 1 hours);
+
+        // keyA: only counter.increment
+        vm.prank(owner);
+        account.registerSessionKey(keyA, address(counter), Counter.increment.selector, validAfter, validUntil);
+
+        // keyB: only counter.setNumber
+        vm.prank(owner);
+        account.registerSessionKey(keyB, address(counter), Counter.setNumber.selector, validAfter, validUntil);
+
+        // keyA can increment
+        bytes memory callDataA =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
+        PackedUserOperation memory opA = _buildUserOp(callDataA);
+        opA.signature = _signUserOp(opA, privA);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = opA;
+        entryPoint.handleOps(ops, beneficiary);
+        assertEq(counter.getCount(address(account)), 1);
+
+        // keyB can setNumber
+        bytes memory callDataB =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.setNumber, (42))));
+        PackedUserOperation memory opB = _buildUserOp(callDataB);
+        opB.signature = _signUserOp(opB, privB);
+
+        ops[0] = opB;
+        entryPoint.handleOps(ops, beneficiary);
+        assertEq(counter.getCount(address(account)), 42);
+
+        // keyA cannot setNumber (wrong selector for keyA)
+        bytes memory callDataBad =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.setNumber, (99))));
+        PackedUserOperation memory opBad = _buildUserOp(callDataBad);
+        opBad.signature = _signUserOp(opBad, privA);
+        bytes32 opBadHash = this.getUserOpHash(opBad);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(opBad, opBadHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
+    function test_validateUserOp_sessionKey_selfCallRejected() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+
+        vm.prank(owner);
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
+
+        // Session key tries to call registerSessionKey on the account itself.
+        // Target is address(account) instead of address(counter) → target mismatch.
+        bytes memory innerData = abi.encodeCall(
+            SmartAccount.registerSessionKey,
+            (makeAddr("evil"), address(counter), Counter.increment.selector, uint48(0), uint48(9999))
+        );
+        bytes memory callData = abi.encodeCall(SmartAccount.execute, (address(account), 0, innerData));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED — target mismatch
+    }
+
+    // ─────────────── Execution: ETH forwarding & reverts ──────────────
+
+    function test_execute_forwardsEthValue() public {
+        address payable recipient = payable(makeAddr("recipient"));
+        uint256 sendAmount = 0.5 ether;
+        uint256 recipientBefore = recipient.balance;
+
+        vm.prank(owner);
+        account.execute(recipient, sendAmount, "");
+
+        assertEq(recipient.balance, recipientBefore + sendAmount);
+    }
+
+    function test_execute_revertsOnFailedCall() public {
+        Reverter reverter = new Reverter();
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SmartAccount.CallFailed.selector, abi.encodeWithSelector(Reverter.AlwaysReverts.selector)
+            )
+        );
+        account.execute(address(reverter), 0, abi.encodeCall(Reverter.fail, ()));
+    }
+
+    function test_executeBatch_forwardsEthValues() public {
+        address payable recipientA = payable(makeAddr("recipientA"));
+        address payable recipientB = payable(makeAddr("recipientB"));
+
+        address[] memory targets = new address[](2);
+        targets[0] = recipientA;
+        targets[1] = recipientB;
+
+        uint256[] memory values = new uint256[](2);
+        values[0] = 0.3 ether;
+        values[1] = 0.2 ether;
+
+        bytes[] memory calldatas = new bytes[](2);
+        calldatas[0] = "";
+        calldatas[1] = "";
+
+        vm.prank(owner);
+        account.executeBatch(targets, values, calldatas);
+
+        assertEq(recipientA.balance, 0.3 ether);
+        assertEq(recipientB.balance, 0.2 ether);
+    }
+
+    function test_executeBatch_revertsOnFailedCall() public {
+        Reverter reverter = new Reverter();
+
+        address[] memory targets = new address[](2);
+        targets[0] = address(counter);
+        targets[1] = address(reverter);
+
+        uint256[] memory values = new uint256[](2);
+
+        bytes[] memory calldatas = new bytes[](2);
+        calldatas[0] = abi.encodeCall(Counter.increment, ());
+        calldatas[1] = abi.encodeCall(Reverter.fail, ());
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SmartAccount.CallFailed.selector, abi.encodeWithSelector(Reverter.AlwaysReverts.selector)
+            )
+        );
+        account.executeBatch(targets, values, calldatas);
+    }
+
+    function test_executeBatch_viaEntryPoint() public {
+        address[] memory targets = new address[](2);
+        targets[0] = address(counter);
+        targets[1] = address(counter);
+
+        uint256[] memory values = new uint256[](2);
+
+        bytes[] memory calldatas = new bytes[](2);
+        calldatas[0] = abi.encodeCall(Counter.increment, ());
+        calldatas[1] = abi.encodeCall(Counter.increment, ());
+
+        bytes memory callData = abi.encodeCall(SmartAccount.executeBatch, (targets, values, calldatas));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, ownerKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        assertEq(counter.getCount(address(account)), 2);
+    }
+}
+
+/// @notice Helper that always reverts — used to test execute/executeBatch error propagation.
+contract Reverter {
+    error AlwaysReverts();
+
+    function fail() external pure {
+        revert AlwaysReverts();
     }
 }
