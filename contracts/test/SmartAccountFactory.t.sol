@@ -123,6 +123,18 @@ contract SmartAccountFactoryTest is Test {
         assertTrue(a != b);
     }
 
+    // ──────────────────── zero-owner guard tests ───────────────────────
+
+    function test_createAccount_revertsZeroOwner() public {
+        vm.expectRevert(SmartAccountFactory.InvalidOwner.selector);
+        factory.createAccount(address(0), 0);
+    }
+
+    function test_getAddress_revertsZeroOwner() public {
+        vm.expectRevert(SmartAccountFactory.InvalidOwner.selector);
+        factory.getAddress(address(0), 0);
+    }
+
     // ──────────────── proxy initialization guard tests ────────────────
 
     function test_proxy_cannotBeReinitialised() public {

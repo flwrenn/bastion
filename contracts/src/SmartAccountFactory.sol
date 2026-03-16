@@ -19,6 +19,9 @@ contract SmartAccountFactory {
     /// @notice Emitted when a new account proxy is deployed.
     event AccountCreated(address indexed account, address indexed owner);
 
+    /// @notice Thrown when owner is the zero address.
+    error InvalidOwner();
+
     /// @notice Deploys the SmartAccount implementation contract.
     /// @param entryPoint_ The EntryPoint v0.7 address passed to the implementation constructor.
     constructor(IEntryPoint entryPoint_) {
@@ -32,6 +35,7 @@ contract SmartAccountFactory {
     /// @param salt  A user-chosen salt for CREATE2 address derivation.
     /// @return ret The SmartAccount proxy (new or existing).
     function createAccount(address owner, uint256 salt) external returns (SmartAccount ret) {
+        if (owner == address(0)) revert InvalidOwner();
         address addr = getAddress(owner, salt);
         if (addr.code.length > 0) {
             return SmartAccount(payable(addr));
@@ -50,6 +54,7 @@ contract SmartAccountFactory {
     /// @param salt  The CREATE2 salt.
     /// @return The deterministic address.
     function getAddress(address owner, uint256 salt) public view returns (address) {
+        if (owner == address(0)) revert InvalidOwner();
         return Create2.computeAddress(
             bytes32(salt),
             keccak256(
