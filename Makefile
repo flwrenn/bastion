@@ -1,4 +1,5 @@
-.PHONY: forge-build forge-test chain export-abis dev build test lint \
+.PHONY: forge-build forge-test forge-deploy chain export-abis export-addresses \
+       dev build test lint \
        indexer-build indexer-test indexer-dev frontend-dev
 
 # ── Foundry ──────────────────────────────────────────────────
@@ -7,6 +8,19 @@ forge-build:
 
 forge-test:
 	cd contracts && forge test -vvv
+
+forge-deploy:
+	cd contracts && forge script script/Deploy.s.sol:Deploy \
+		--rpc-url sepolia \
+		--broadcast \
+		--verify \
+		--etherscan-api-key $(ETHERSCAN_API_KEY) \
+		-vvvv
+
+forge-deploy-dry:
+	cd contracts && forge script script/Deploy.s.sol:Deploy \
+		--rpc-url sepolia \
+		-vvvv
 
 chain:
 	anvil
@@ -34,6 +48,9 @@ frontend-lint:
 # ── ABI bridge ───────────────────────────────────────────────
 export-abis: forge-build
 	./scripts/export-abis.sh
+
+export-addresses:
+	./scripts/export-addresses.sh
 
 # ── Full stack ───────────────────────────────────────────────
 dev:

@@ -10,6 +10,8 @@ remappings = [
     "solady/=lib/solady/src/",
 ]
 
+fs_permissions = [{ access = "read-write", path = "deployments/" }]
+
 [fmt]
 line_length = 120
 
