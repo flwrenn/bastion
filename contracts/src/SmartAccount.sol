@@ -4,7 +4,11 @@ pragma solidity ^0.8.28;
 import {BaseAccount} from "@account-abstraction/contracts/core/BaseAccount.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
-import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS, _packValidationData} from "@account-abstraction/contracts/core/Helpers.sol";
+import {
+    SIG_VALIDATION_FAILED,
+    SIG_VALIDATION_SUCCESS,
+    _packValidationData
+} from "@account-abstraction/contracts/core/Helpers.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
@@ -38,10 +42,7 @@ contract SmartAccount is BaseAccount, Initializable {
 
     // ───────────────────────────── Events ──────────────────────────────
 
-    event SmartAccountInitialized(
-        IEntryPoint indexed entryPoint,
-        address indexed owner
-    );
+    event SmartAccountInitialized(IEntryPoint indexed entryPoint, address indexed owner);
 
     /// @notice Emitted when the owner registers a new session key (exam spec name).
     event SessionKeyAdded(address indexed key, uint256 expiry);
@@ -106,14 +107,15 @@ contract SmartAccount is BaseAccount, Initializable {
     ///         is signed — it cannot be tampered with between validation and execution.
     ///
     /// @inheritdoc BaseAccount
-    function _validateSignature(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash
-    ) internal view override returns (uint256 validationData) {
+    function _validateSignature(PackedUserOperation calldata userOp, bytes32 userOpHash)
+        internal
+        view
+        override
+        returns (uint256 validationData)
+    {
         bytes32 ethSignedHash = userOpHash.toEthSignedMessageHash();
 
-        (address recovered, ECDSA.RecoverError err, ) = ethSignedHash
-            .tryRecover(userOp.signature);
+        (address recovered, ECDSA.RecoverError err,) = ethSignedHash.tryRecover(userOp.signature);
         if (err != ECDSA.RecoverError.NoError) {
             return SIG_VALIDATION_FAILED;
         }
@@ -145,11 +147,8 @@ contract SmartAccount is BaseAccount, Initializable {
         uint48 validUntil
     ) external onlyOwnerOrEntryPoint {
         if (
-            key == address(0) ||
-            allowedTarget == address(0) ||
-            allowedSelector == bytes4(0) ||
-            validUntil == 0 ||
-            validUntil <= validAfter
+            key == address(0) || allowedTarget == address(0) || allowedSelector == bytes4(0) || validUntil == 0
+                || validUntil <= validAfter
         ) {
             revert InvalidSessionKeyParams();
         }
@@ -188,14 +187,8 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @param target  The contract (or EOA) to call.
     /// @param value   The ETH value to send.
     /// @param data    The calldata (function selector + arguments).
-    function execute(
-        address target,
-        uint256 value,
-        bytes calldata data
-    ) external onlyOwnerOrEntryPoint {
-        (bool success, bytes memory returnData) = target.call{value: value}(
-            data
-        );
+    function execute(address target, uint256 value, bytes calldata data) external onlyOwnerOrEntryPoint {
+        (bool success, bytes memory returnData) = target.call{value: value}(data);
         if (!success) {
             revert CallFailed(returnData);
         }
@@ -206,20 +199,13 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @param targets  Array of addresses to call.
     /// @param values   Array of ETH values to send.
     /// @param calldatas Array of calldata payloads.
-    function executeBatch(
-        address[] calldata targets,
-        uint256[] calldata values,
-        bytes[] calldata calldatas
-    ) external onlyOwnerOrEntryPoint {
-        require(
-            targets.length == values.length &&
-                values.length == calldatas.length,
-            "length mismatch"
-        );
+    function executeBatch(address[] calldata targets, uint256[] calldata values, bytes[] calldata calldatas)
+        external
+        onlyOwnerOrEntryPoint
+    {
+        require(targets.length == values.length && values.length == calldatas.length, "length mismatch");
         for (uint256 i = 0; i < targets.length; i++) {
-            (bool success, bytes memory returnData) = targets[i].call{
-                value: values[i]
-            }(calldatas[i]);
+            (bool success, bytes memory returnData) = targets[i].call{value: values[i]}(calldatas[i]);
             if (!success) {
                 revert CallFailed(returnData);
             }
@@ -256,10 +242,7 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @param signer  The recovered session key address.
     /// @param callData The full userOp.callData.
     /// @return validationData Packed (sigFailed, validUntil, validAfter) or SIG_VALIDATION_FAILED.
-    function _validateSessionKey(
-        address signer,
-        bytes calldata callData
-    ) internal view returns (uint256) {
+    function _validateSessionKey(address signer, bytes calldata callData) internal view returns (uint256) {
         SessionKeyData storage sk = sessionKeys[signer];
 
         if (sk.validUntil == 0) {
@@ -269,10 +252,7 @@ contract SmartAccount is BaseAccount, Initializable {
         // Min 136 bytes: 4 (selector) + 3×32 (head) + 32 (data length) + 4 (inner selector).
         // Shorter calldata would cause OOB reads, reverting instead of returning
         // SIG_VALIDATION_FAILED (violating ERC-4337).
-        if (
-            callData.length < 136 ||
-            bytes4(callData[:4]) != this.execute.selector
-        ) {
+        if (callData.length < 136 || bytes4(callData[:4]) != this.execute.selector) {
             return SIG_VALIDATION_FAILED;
         }
 

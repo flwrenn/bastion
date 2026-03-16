@@ -77,10 +77,7 @@ contract SmartAccountTest is Test {
     }
 
     /// @notice Signs a UserOp: compute hash → EIP-191 prefix → vm.sign → pack (r, s, v).
-    function _signUserOp(
-        PackedUserOperation memory userOp,
-        uint256 privateKey
-    ) internal view returns (bytes memory) {
+    function _signUserOp(PackedUserOperation memory userOp, uint256 privateKey) internal view returns (bytes memory) {
         bytes32 userOpHash = this.getUserOpHash(userOp);
         bytes32 ethSignedHash = userOpHash.toEthSignedMessageHash();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, ethSignedHash);
@@ -159,10 +156,8 @@ contract SmartAccountTest is Test {
 
     function test_execute_fromEntryPoint() public {
         // Full ERC-4337 flow: handleOps → validateUserOp → execute → counter.increment
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, ownerKey);
 
@@ -233,26 +228,14 @@ contract SmartAccountTest is Test {
         emit SmartAccount.SessionKeyAdded(sessionKey, 2000);
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_storesData() public {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
         (address target, bytes4 selector, uint48 validAfter, uint48 validUntil) = account.sessionKeys(sessionKey);
         assertEq(target, address(counter));
@@ -264,13 +247,7 @@ contract SmartAccountTest is Test {
     function test_registerSessionKey_revertsZeroAddress() public {
         vm.prank(owner);
         vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
-        account.registerSessionKey(
-            address(0),
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(address(0), address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_revertsZeroTarget() public {
@@ -278,13 +255,7 @@ contract SmartAccountTest is Test {
 
         vm.prank(owner);
         vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
-        account.registerSessionKey(
-            sessionKey,
-            address(0),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(0), Counter.increment.selector, uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_revertsZeroSelector() public {
@@ -292,13 +263,7 @@ contract SmartAccountTest is Test {
 
         vm.prank(owner);
         vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            bytes4(0),
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), bytes4(0), uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_revertsZeroValidUntil() public {
@@ -306,13 +271,7 @@ contract SmartAccountTest is Test {
 
         vm.prank(owner);
         vm.expectRevert(SmartAccount.InvalidSessionKeyParams.selector);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(0)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(0));
     }
 
     function test_registerSessionKey_revertsValidUntilLteValidAfter() public {
@@ -333,23 +292,11 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(SmartAccount.SessionKeyAlreadyRegistered.selector, sessionKey));
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_revertsFromStranger() public {
@@ -357,13 +304,7 @@ contract SmartAccountTest is Test {
 
         vm.prank(stranger);
         vm.expectRevert(SmartAccount.OnlyOwnerOrEntryPoint.selector);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
     }
 
     function test_registerSessionKey_viaEntryPoint() public {
@@ -380,7 +321,7 @@ contract SmartAccountTest is Test {
         ops[0] = userOp;
         entryPoint.handleOps(ops, beneficiary);
 
-        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        (,,, uint48 validUntil) = account.sessionKeys(sessionKey);
         assertEq(validUntil, 2000);
     }
 
@@ -390,13 +331,7 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
         vm.expectEmit(true, false, false, false);
         emit SmartAccount.SessionKeyRevoked(sessionKey);
@@ -409,18 +344,12 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
         vm.prank(owner);
         account.revokeSessionKey(sessionKey);
 
-        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        (,,, uint48 validUntil) = account.sessionKeys(sessionKey);
         assertEq(validUntil, 0);
     }
 
@@ -434,13 +363,7 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
         vm.prank(stranger);
         vm.expectRevert(SmartAccount.OnlyOwnerOrEntryPoint.selector);
@@ -451,18 +374,9 @@ contract SmartAccountTest is Test {
         (address sessionKey,) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(1000),
-            uint48(2000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(1000), uint48(2000));
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.revokeSessionKey,
-            (sessionKey)
-        );
+        bytes memory callData = abi.encodeCall(SmartAccount.revokeSessionKey, (sessionKey));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, ownerKey);
 
@@ -470,7 +384,7 @@ contract SmartAccountTest is Test {
         ops[0] = userOp;
         entryPoint.handleOps(ops, beneficiary);
 
-        (, , , uint48 validUntil) = account.sessionKeys(sessionKey);
+        (,,, uint48 validUntil) = account.sessionKeys(sessionKey);
         assertEq(validUntil, 0);
     }
 
@@ -480,18 +394,10 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -514,18 +420,10 @@ contract SmartAccountTest is Test {
         address wrongTarget = makeAddr("wrongTarget");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (wrongTarget, 0, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (wrongTarget, 0, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -547,10 +445,8 @@ contract SmartAccountTest is Test {
             uint48(5000)
         );
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 0, abi.encodeCall(Counter.setNumber, (42)))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.setNumber, (42))));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -564,13 +460,7 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         address[] memory targets = new address[](1);
         targets[0] = address(counter);
@@ -578,10 +468,7 @@ contract SmartAccountTest is Test {
         bytes[] memory calldatas = new bytes[](1);
         calldatas[0] = abi.encodeCall(Counter.increment, ());
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.executeBatch,
-            (targets, values, calldatas)
-        );
+        bytes memory callData = abi.encodeCall(SmartAccount.executeBatch, (targets, values, calldatas));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -595,21 +482,13 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         vm.prank(owner);
         account.revokeSessionKey(sessionKey);
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -623,13 +502,7 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         // Craft calldata with non-canonical ABI offset.
         // Normal execute(address,uint256,bytes) has offset 0x60 at [68:100].
@@ -637,16 +510,16 @@ contract SmartAccountTest is Test {
         // fool a naive fixed-offset check, and put the real (malicious) data
         // where Solidity's abi.decode would actually read it.
         bytes memory malicious = abi.encodePacked(
-            SmartAccount.execute.selector,     // [0:4]   outer selector
+            SmartAccount.execute.selector, // [0:4]   outer selector
             bytes32(uint256(uint160(address(counter)))), // [4:36]  target
-            bytes32(uint256(0)),                // [36:68] value
-            bytes32(uint256(0xA0)),             // [68:100] non-canonical offset
-            bytes32(0),                         // [100:132] padding
-            Counter.increment.selector,         // [132:136] decoy selector
-            bytes28(0),                         // [136:164] padding
-            bytes32(uint256(4)),                // [164:196] length of inner data
-            Counter.setNumber.selector,         // [196:200] actual malicious selector
-            bytes28(0)                          // [200:228] padding
+            bytes32(uint256(0)), // [36:68] value
+            bytes32(uint256(0xA0)), // [68:100] non-canonical offset
+            bytes32(0), // [100:132] padding
+            Counter.increment.selector, // [132:136] decoy selector
+            bytes28(0), // [136:164] padding
+            bytes32(uint256(4)), // [164:196] length of inner data
+            Counter.setNumber.selector, // [196:200] actual malicious selector
+            bytes28(0) // [200:228] padding
         );
 
         PackedUserOperation memory userOp = _buildUserOp(malicious);
@@ -662,18 +535,10 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 1 ether, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 1 ether, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
         bytes32 userOpHash = this.getUserOpHash(userOp);
@@ -687,26 +552,20 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         // Craft calldata where data.length is 0 but trailing bytes contain the
         // allowed selector at [132:136]. Without the dataLen check, our validation
         // would read the trailing bytes and pass, while execute would forward empty
         // calldata (hitting the target's fallback instead of increment).
         bytes memory malicious = abi.encodePacked(
-            SmartAccount.execute.selector,               // [0:4]   outer selector
-            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
-            bytes32(uint256(0)),                          // [36:68] value
-            bytes32(uint256(0x60)),                       // [68:100] canonical offset
-            bytes32(uint256(0)),                          // [100:132] data.length = 0
-            Counter.increment.selector,                   // [132:136] trailing decoy
-            bytes28(0)                                    // [136:164] padding
+            SmartAccount.execute.selector, // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))), // [4:36]  target
+            bytes32(uint256(0)), // [36:68] value
+            bytes32(uint256(0x60)), // [68:100] canonical offset
+            bytes32(uint256(0)), // [100:132] data.length = 0
+            Counter.increment.selector, // [132:136] trailing decoy
+            bytes28(0) // [136:164] padding
         );
 
         PackedUserOperation memory userOp = _buildUserOp(malicious);
@@ -722,22 +581,16 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         // Craft calldata that is 100 bytes — long enough to pass a naive >= 100
         // check but too short for the [100:132] slice. Must return
         // SIG_VALIDATION_FAILED, not revert.
         bytes memory truncated = abi.encodePacked(
-            SmartAccount.execute.selector,               // [0:4]   outer selector
-            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
-            bytes32(uint256(0)),                          // [36:68] value
-            bytes32(uint256(0x60))                        // [68:100] canonical offset
+            SmartAccount.execute.selector, // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))), // [4:36]  target
+            bytes32(uint256(0)), // [36:68] value
+            bytes32(uint256(0x60)) // [68:100] canonical offset
             // nothing beyond 100 — triggers OOB without the length fix
         );
 
@@ -754,24 +607,18 @@ contract SmartAccountTest is Test {
         (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            uint48(100),
-            uint48(5000)
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, uint48(100), uint48(5000));
 
         // Craft calldata with a huge data.length that would overflow 132 + dataLen.
         // Must return SIG_VALIDATION_FAILED, not revert with arithmetic overflow.
         bytes memory malicious = abi.encodePacked(
-            SmartAccount.execute.selector,               // [0:4]   outer selector
-            bytes32(uint256(uint160(address(counter)))),  // [4:36]  target
-            bytes32(uint256(0)),                          // [36:68] value
-            bytes32(uint256(0x60)),                       // [68:100] canonical offset
-            bytes32(type(uint256).max),                   // [100:132] huge dataLen
-            Counter.increment.selector,                   // [132:136] inner selector
-            bytes28(0)                                    // [136:164] padding
+            SmartAccount.execute.selector, // [0:4]   outer selector
+            bytes32(uint256(uint160(address(counter)))), // [4:36]  target
+            bytes32(uint256(0)), // [36:68] value
+            bytes32(uint256(0x60)), // [68:100] canonical offset
+            bytes32(type(uint256).max), // [100:132] huge dataLen
+            Counter.increment.selector, // [132:136] inner selector
+            bytes28(0) // [136:164] padding
         );
 
         PackedUserOperation memory userOp = _buildUserOp(malicious);
@@ -792,18 +639,10 @@ contract SmartAccountTest is Test {
         uint48 validUntil = uint48(block.timestamp + 1 hours);
 
         vm.prank(owner);
-        account.registerSessionKey(
-            sessionKey,
-            address(counter),
-            Counter.increment.selector,
-            validAfter,
-            validUntil
-        );
+        account.registerSessionKey(sessionKey, address(counter), Counter.increment.selector, validAfter, validUntil);
 
-        bytes memory callData = abi.encodeCall(
-            SmartAccount.execute,
-            (address(counter), 0, abi.encodeCall(Counter.increment, ()))
-        );
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
         PackedUserOperation memory userOp = _buildUserOp(callData);
         userOp.signature = _signUserOp(userOp, sessionPrivKey);
 
