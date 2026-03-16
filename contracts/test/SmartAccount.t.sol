@@ -805,7 +805,7 @@ contract SmartAccountTest is Test {
         vm.recordLogs();
         entryPoint.handleOps(ops, beneficiary);
 
-        // The UserOperationEvent's success field (4th non-indexed param) should be false.
+        // The UserOperationEvent's success field (2nd non-indexed param) should be false.
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bool foundEvent = false;
         for (uint256 i = 0; i < logs.length; i++) {
