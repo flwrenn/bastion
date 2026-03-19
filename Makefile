@@ -1,6 +1,7 @@
-.PHONY: forge-build forge-test forge-deploy chain export-abis export-addresses \
-       dev build test lint \
-       indexer-build indexer-test indexer-dev frontend-dev
+.PHONY: forge-build forge-test forge-deploy forge-deploy-dry chain \
+       export-abis export-addresses dev build test lint \
+       indexer-build indexer-test indexer-dev \
+       frontend-dev frontend-build frontend-lint
 
 # ── Foundry ──────────────────────────────────────────────────
 forge-build:

@@ -28,7 +28,8 @@ contract Deploy is Script {
     address constant ENTRYPOINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 
     function run() external {
-        vm.startBroadcast();
+        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        vm.startBroadcast(deployerKey);
 
         SmartAccountFactory factory = new SmartAccountFactory(IEntryPoint(ENTRYPOINT_V07));
         Counter counter = new Counter();
@@ -43,14 +44,15 @@ contract Deploy is Script {
         console.log("Counter:              ", address(counter));
         console.log("FaucetToken:          ", address(faucetToken));
 
-        // Write addresses to a JSON file for frontend consumption.
+        // Write addresses to a JSON file named by chain ID for frontend consumption.
         string memory json = "deploy";
         vm.serializeAddress(json, "entryPoint", ENTRYPOINT_V07);
         vm.serializeAddress(json, "factory", address(factory));
         vm.serializeAddress(json, "accountImplementation", address(factory.accountImplementation()));
         vm.serializeAddress(json, "counter", address(counter));
         string memory output = vm.serializeAddress(json, "faucetToken", address(faucetToken));
-        vm.writeJson(output, "./deployments/sepolia.json");
-        console.log("Addresses written to deployments/sepolia.json");
+        string memory path = string.concat("./deployments/", vm.toString(block.chainid), ".json");
+        vm.writeJson(output, path);
+        console.log("Addresses written to", path);
     }
 }
