@@ -29,14 +29,18 @@ func main() {
 	}
 
 	// Connect to PostgreSQL and run pending migrations.
-	pool, err := db.Connect(ctx, databaseURL)
+	// Bounded so the process fails fast if the DB is unreachable.
+	startupCtx, startupCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer startupCancel()
+
+	pool, err := db.Connect(startupCtx, databaseURL)
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	if err := db.Migrate(ctx, pool); err != nil {
+	if err := db.Migrate(startupCtx, pool); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}

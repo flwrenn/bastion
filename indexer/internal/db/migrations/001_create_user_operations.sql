@@ -1,21 +1,24 @@
--- Migration 001: Create user_operations table
+-- Migration 001: Create initial indexer schema
 --
--- Stores indexed UserOperationEvent data from EntryPoint v0.7.
--- Fields come from two sources:
+-- Tables:
+--   user_operations — indexed UserOperationEvent data from EntryPoint v0.7.
+--   indexer_state   — key-value store for indexer cursor / checkpoint.
+--
+-- user_operations fields come from two sources:
 --   Event topics/data: user_op_hash, sender, paymaster, nonce, success,
 --                      actual_gas_cost, actual_gas_used
 --   Transaction context: tx_hash, block_number, block_timestamp, log_index
 
 CREATE TABLE IF NOT EXISTS user_operations (
     id               BIGSERIAL    PRIMARY KEY,
-    user_op_hash     BYTEA        NOT NULL,
-    sender           BYTEA        NOT NULL,
-    paymaster        BYTEA        NOT NULL,
+    user_op_hash     BYTEA        NOT NULL CHECK (octet_length(user_op_hash) = 32),
+    sender           BYTEA        NOT NULL CHECK (octet_length(sender) = 20),
+    paymaster        BYTEA        NOT NULL CHECK (octet_length(paymaster) = 20),
     nonce            NUMERIC      NOT NULL,
     success          BOOLEAN      NOT NULL,
     actual_gas_cost  NUMERIC      NOT NULL,
     actual_gas_used  NUMERIC      NOT NULL,
-    tx_hash          BYTEA        NOT NULL,
+    tx_hash          BYTEA        NOT NULL CHECK (octet_length(tx_hash) = 32),
     block_number     BIGINT       NOT NULL,
     block_timestamp  BIGINT       NOT NULL,
     log_index        INTEGER      NOT NULL,
