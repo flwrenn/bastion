@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
 )
@@ -58,11 +59,15 @@ func main() {
 		Handler: mux,
 	}
 
-	// Shut down gracefully on signal.
+	// Shut down gracefully on signal, draining in-flight requests.
 	go func() {
 		<-ctx.Done()
 		slog.Info("shutting down")
-		_ = srv.Close()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("shutdown error", "error", err)
+		}
 	}()
 
 	slog.Info("indexer API listening", "port", port)

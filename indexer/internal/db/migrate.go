@@ -5,12 +5,16 @@ import (
 	"embed"
 	"fmt"
 	"log/slog"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Advisory lock ID for migration serialisation. Chosen arbitrarily;
+// must be consistent across all indexer instances sharing the same DB.
+const migrationLockID int64 = 0x626173_6d696772 // "bas" + "migr"
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -19,8 +23,22 @@ var migrationFS embed.FS
 // Each migration runs in its own transaction. Applied migrations are
 // tracked in the schema_migrations table to ensure idempotency.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	// Acquire an advisory lock so concurrent instances don't race.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire conn for migration lock: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockID); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockID)
+	}()
+
 	// Ensure the tracking table exists.
-	if _, err := pool.Exec(ctx, `
+	if _, err := conn.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			filename TEXT PRIMARY KEY,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -46,7 +64,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, name := range names {
 		// Check if already applied.
 		var exists bool
-		err := pool.QueryRow(ctx,
+		err := conn.QueryRow(ctx,
 			"SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE filename = $1)",
 			name,
 		).Scan(&exists)
@@ -58,12 +76,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 
 		// Read and execute the migration in a transaction.
-		sql, err := migrationFS.ReadFile(filepath.Join("migrations", name))
+		sql, err := migrationFS.ReadFile(path.Join("migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		tx, err := pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("begin tx for %s: %w", name, err)
 		}

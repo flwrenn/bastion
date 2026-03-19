@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS user_operations (
 );
 
 -- Query patterns: filter by sender, filter by block range, lookup by hash.
-CREATE INDEX idx_user_operations_sender       ON user_operations (sender);
-CREATE INDEX idx_user_operations_block_number ON user_operations (block_number);
-CREATE INDEX idx_user_operations_user_op_hash ON user_operations (user_op_hash);
+CREATE INDEX IF NOT EXISTS idx_user_operations_sender       ON user_operations (sender);
+CREATE INDEX IF NOT EXISTS idx_user_operations_block_number ON user_operations (block_number);
+CREATE INDEX IF NOT EXISTS idx_user_operations_user_op_hash ON user_operations (user_op_hash);
 
 -- Tracks which block the indexer has processed up to, enabling
 -- resumable backfill and gap detection after restarts.
