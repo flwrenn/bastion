@@ -1,7 +1,8 @@
 .PHONY: forge-build forge-test forge-deploy forge-deploy-dry chain \
        export-abis export-addresses dev build test lint \
        indexer-build indexer-test indexer-dev \
-       frontend-dev frontend-build frontend-lint
+       frontend-dev frontend-build frontend-lint \
+       db-up db-down db-logs
 
 # ── Foundry ──────────────────────────────────────────────────
 forge-build:
@@ -28,6 +29,16 @@ forge-deploy-dry:
 
 chain:
 	anvil
+
+# ── Database ─────────────────────────────────────────────────
+db-up:
+	docker compose up -d postgres
+
+db-down:
+	docker compose down
+
+db-logs:
+	docker compose logs -f postgres
 
 # ── Go indexer ───────────────────────────────────────────────
 indexer-build:

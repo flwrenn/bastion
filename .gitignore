@@ -19,6 +19,7 @@ vite.config.ts.timestamp-*
 
 # Indexer
 indexer/bin/
+indexer/indexer
 
 # Local
 tmp/
