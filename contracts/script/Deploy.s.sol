@@ -30,8 +30,15 @@ contract Deploy is Script {
 
     function run() external {
         address entryPoint = vm.envOr("ENTRYPOINT", ENTRYPOINT_V07);
-        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        vm.startBroadcast(deployerKey);
+
+        // Use DEPLOYER_PRIVATE_KEY when set (real broadcast); fall back to
+        // bare startBroadcast() for dry-runs so no key is required.
+        uint256 deployerKey = vm.envOr("DEPLOYER_PRIVATE_KEY", uint256(0));
+        if (deployerKey != 0) {
+            vm.startBroadcast(deployerKey);
+        } else {
+            vm.startBroadcast();
+        }
 
         SmartAccountFactory factory = new SmartAccountFactory(IEntryPoint(entryPoint));
         Counter counter = new Counter();
