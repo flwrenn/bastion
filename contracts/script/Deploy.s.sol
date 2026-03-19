@@ -25,20 +25,22 @@ import {FaucetToken} from "../src/FaucetToken.sol";
 ///             -vvvv
 contract Deploy is Script {
     /// @notice EntryPoint v0.7 — canonical address on all EVM chains.
+    ///         Override via ENTRYPOINT env var for non-standard networks.
     address constant ENTRYPOINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 
     function run() external {
+        address entryPoint = vm.envOr("ENTRYPOINT", ENTRYPOINT_V07);
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(deployerKey);
 
-        SmartAccountFactory factory = new SmartAccountFactory(IEntryPoint(ENTRYPOINT_V07));
+        SmartAccountFactory factory = new SmartAccountFactory(IEntryPoint(entryPoint));
         Counter counter = new Counter();
         FaucetToken faucetToken = new FaucetToken();
 
         vm.stopBroadcast();
 
         console.log("--- Bastion Deployment ---");
-        console.log("EntryPoint:           ", ENTRYPOINT_V07);
+        console.log("EntryPoint:           ", entryPoint);
         console.log("SmartAccountFactory:  ", address(factory));
         console.log("  -> Implementation:  ", address(factory.accountImplementation()));
         console.log("Counter:              ", address(counter));
@@ -46,7 +48,7 @@ contract Deploy is Script {
 
         // Write addresses to a JSON file named by chain ID for frontend consumption.
         string memory json = "deploy";
-        vm.serializeAddress(json, "entryPoint", ENTRYPOINT_V07);
+        vm.serializeAddress(json, "entryPoint", entryPoint);
         vm.serializeAddress(json, "factory", address(factory));
         vm.serializeAddress(json, "accountImplementation", address(factory.accountImplementation()));
         vm.serializeAddress(json, "counter", address(counter));
