@@ -11,6 +11,9 @@ forge-test:
 	cd contracts && forge test -vvv
 
 forge-deploy:
+ifndef ETHERSCAN_API_KEY
+	$(error ETHERSCAN_API_KEY is not set — required for contract verification)
+endif
 	cd contracts && forge script script/Deploy.s.sol:Deploy \
 		--rpc-url sepolia \
 		--broadcast \
