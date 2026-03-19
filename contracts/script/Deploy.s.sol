@@ -47,14 +47,19 @@ contract Deploy is Script {
         console.log("FaucetToken:          ", address(faucetToken));
 
         // Write addresses to a JSON file named by chain ID for frontend consumption.
-        string memory json = "deploy";
-        vm.serializeAddress(json, "entryPoint", entryPoint);
-        vm.serializeAddress(json, "factory", address(factory));
-        vm.serializeAddress(json, "accountImplementation", address(factory.accountImplementation()));
-        vm.serializeAddress(json, "counter", address(counter));
-        string memory output = vm.serializeAddress(json, "faucetToken", address(faucetToken));
-        string memory path = string.concat("./deployments/", vm.toString(block.chainid), ".json");
-        vm.writeJson(output, path);
-        console.log("Addresses written to", path);
+        // Only written when SAVE_DEPLOY=true to avoid overwriting canonical
+        // deployment data during dry-runs.
+        bool save = vm.envOr("SAVE_DEPLOY", false);
+        if (save) {
+            string memory json = "deploy";
+            vm.serializeAddress(json, "entryPoint", entryPoint);
+            vm.serializeAddress(json, "factory", address(factory));
+            vm.serializeAddress(json, "accountImplementation", address(factory.accountImplementation()));
+            vm.serializeAddress(json, "counter", address(counter));
+            string memory output = vm.serializeAddress(json, "faucetToken", address(faucetToken));
+            string memory path = string.concat("./deployments/", vm.toString(block.chainid), ".json");
+            vm.writeJson(output, path);
+            console.log("Addresses written to", path);
+        }
     }
 }
