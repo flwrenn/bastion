@@ -22,12 +22,15 @@ contract FaucetToken is ERC20 {
 
     constructor() ERC20("Bastion Faucet Token", "BFT") {}
 
-    /// @notice Mint `CLAIM_AMOUNT` tokens to the caller. Reverts if the
-    ///         cooldown has not elapsed since the caller's last claim.
+    /// @notice Mint `CLAIM_AMOUNT` tokens to the caller. The first claim
+    ///         always succeeds; subsequent claims must wait `CLAIM_COOLDOWN`.
     function claim() external {
-        uint256 availableAt = lastClaimed[msg.sender] + CLAIM_COOLDOWN;
-        if (block.timestamp < availableAt) {
-            revert ClaimCooldown(availableAt);
+        uint256 last = lastClaimed[msg.sender];
+        if (last != 0) {
+            uint256 availableAt = last + CLAIM_COOLDOWN;
+            if (block.timestamp < availableAt) {
+                revert ClaimCooldown(availableAt);
+            }
         }
 
         lastClaimed[msg.sender] = block.timestamp;
