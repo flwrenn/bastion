@@ -20,8 +20,9 @@ const migrationLockID int64 = 0x626173_6d696772 // "bas" + "migr"
 var migrationFS embed.FS
 
 // Migrate runs all pending SQL migrations in lexicographic order.
-// Each migration runs in its own transaction. Applied migrations are
-// tracked in the schema_migrations table to ensure idempotency.
+// DDL is executed via the simple query protocol to support multi-
+// statement migration files. Applied migrations are tracked in the
+// schema_migrations table to ensure idempotency.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	// Acquire an advisory lock so concurrent instances don't race.
 	conn, err := pool.Acquire(ctx)
@@ -75,31 +76,23 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			continue
 		}
 
-		// Read and execute the migration in a transaction.
+		// Read and execute the migration.
 		sql, err := migrationFS.ReadFile(path.Join("migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			return fmt.Errorf("begin tx for %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec(ctx, string(sql)); err != nil {
-			_ = tx.Rollback(ctx)
+		// Execute DDL via the simple query protocol, which supports
+		// multi-statement SQL. pgx's default mode (extended/prepared)
+		// rejects multi-statement strings.
+		if _, err := conn.Conn().PgConn().Exec(ctx, string(sql)).ReadAll(); err != nil {
 			return fmt.Errorf("execute migration %s: %w", name, err)
 		}
 
-		if _, err := tx.Exec(ctx,
+		if _, err := conn.Exec(ctx,
 			"INSERT INTO schema_migrations (filename) VALUES ($1)", name,
 		); err != nil {
-			_ = tx.Rollback(ctx)
 			return fmt.Errorf("record migration %s: %w", name, err)
-		}
-
-		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 
 		slog.Info("applied migration", "file", name)
