@@ -11,10 +11,10 @@ type UserOperation struct {
 	Paymaster      []byte
 	Target         []byte
 	Calldata       []byte
-	Nonce          string // numeric — stored as string to handle uint256
+	Nonce          string // DB NUMERIC — Go string for uint256 range
 	Success        bool
-	ActualGasCost  string // numeric
-	ActualGasUsed  string // numeric
+	ActualGasCost  string // DB NUMERIC — Go string for uint256 range
+	ActualGasUsed  string // DB NUMERIC — Go string for uint256 range
 	TxHash         []byte
 	BlockNumber    int64
 	BlockTimestamp int64
