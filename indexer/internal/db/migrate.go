@@ -20,9 +20,9 @@ const migrationLockID int64 = 0x626173_6d696772 // "bas" + "migr"
 var migrationFS embed.FS
 
 // Migrate runs all pending SQL migrations in lexicographic order.
-// DDL is executed via the simple query protocol to support multi-
-// statement migration files. Applied migrations are tracked in the
-// schema_migrations table to ensure idempotency.
+// Each migration runs in its own transaction. DDL is executed via
+// the simple query protocol to support multi-statement files.
+// Applied migrations are tracked in schema_migrations for idempotency.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	// Acquire an advisory lock so concurrent instances don't race.
 	conn, err := pool.Acquire(ctx)
@@ -82,17 +82,30 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		// Execute DDL via the simple query protocol, which supports
-		// multi-statement SQL. pgx's default mode (extended/prepared)
-		// rejects multi-statement strings.
-		if _, err := conn.Conn().PgConn().Exec(ctx, string(sql)).ReadAll(); err != nil {
+		pgConn := conn.Conn().PgConn()
+
+		// Wrap DDL + tracking INSERT in a transaction.
+		// BEGIN/COMMIT use the simple query protocol (pgconn) to stay
+		// on the same connection; the INSERT uses pgx's extended
+		// protocol for parameterised safety.
+		if _, err := pgConn.Exec(ctx, "BEGIN").ReadAll(); err != nil {
+			return fmt.Errorf("begin tx for %s: %w", name, err)
+		}
+
+		if _, err := pgConn.Exec(ctx, string(sql)).ReadAll(); err != nil {
+			_, _ = pgConn.Exec(ctx, "ROLLBACK").ReadAll()
 			return fmt.Errorf("execute migration %s: %w", name, err)
 		}
 
 		if _, err := conn.Exec(ctx,
 			"INSERT INTO schema_migrations (filename) VALUES ($1)", name,
 		); err != nil {
+			_, _ = pgConn.Exec(ctx, "ROLLBACK").ReadAll()
 			return fmt.Errorf("record migration %s: %w", name, err)
+		}
+
+		if _, err := pgConn.Exec(ctx, "COMMIT").ReadAll(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 
 		slog.Info("applied migration", "file", name)
