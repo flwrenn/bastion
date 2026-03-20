@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -15,6 +16,14 @@ import (
 // Advisory lock ID for migration serialisation. Chosen arbitrarily;
 // must be consistent across all indexer instances sharing the same DB.
 const migrationLockID int64 = 0x626173_6d696772 // "bas" + "migr"
+
+const cleanupTimeout = 5 * time.Second
+
+// cleanupCtx returns a bounded context detached from the caller, ensuring
+// cleanup operations (unlock, rollback) aren't blocked by a canceled parent.
+func cleanupCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), cleanupTimeout)
+}
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -35,7 +44,12 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
 	defer func() {
-		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockID)
+		cctx, cancel := cleanupCtx()
+		defer cancel()
+		if _, unlockErr := conn.Exec(cctx, "SELECT pg_advisory_unlock($1)", migrationLockID); unlockErr != nil {
+			conn.Conn().Close(cctx)
+			slog.Error("migration lock release failed; connection destroyed", "err", unlockErr)
+		}
 	}()
 
 	// Ensure the tracking table exists.
@@ -84,6 +98,15 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 
 		pgConn := conn.Conn().PgConn()
 
+		rollback := func() {
+			rctx, cancel := cleanupCtx()
+			defer cancel()
+			if _, rbErr := pgConn.Exec(rctx, "ROLLBACK").ReadAll(); rbErr != nil {
+				conn.Conn().Close(rctx)
+				slog.Error("migration rollback failed; connection destroyed", "migration", name, "err", rbErr)
+			}
+		}
+
 		// Wrap DDL + tracking INSERT in a transaction.
 		// BEGIN/COMMIT use the simple query protocol (pgconn) to stay
 		// on the same connection; the INSERT uses pgx's extended
@@ -93,18 +116,19 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 
 		if _, err := pgConn.Exec(ctx, string(sql)).ReadAll(); err != nil {
-			_, _ = pgConn.Exec(ctx, "ROLLBACK").ReadAll()
+			rollback()
 			return fmt.Errorf("execute migration %s: %w", name, err)
 		}
 
 		if _, err := conn.Exec(ctx,
 			"INSERT INTO schema_migrations (filename) VALUES ($1)", name,
 		); err != nil {
-			_, _ = pgConn.Exec(ctx, "ROLLBACK").ReadAll()
+			rollback()
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 
 		if _, err := pgConn.Exec(ctx, "COMMIT").ReadAll(); err != nil {
+			rollback()
 			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 
