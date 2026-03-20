@@ -2,12 +2,15 @@ package db
 
 // UserOperation represents a row in the user_operations table.
 // Fields map to the EntryPoint v0.7 UserOperationEvent plus
-// transaction-level context (tx hash, block, timestamp, log index).
+// decoded inner-call fields (target, calldata) and transaction-
+// level context (tx hash, block, timestamp, log index).
 type UserOperation struct {
 	ID             int64
 	UserOpHash     []byte
 	Sender         []byte
 	Paymaster      []byte
+	Target         []byte
+	Calldata       []byte
 	Nonce          string // numeric — stored as string to handle uint256
 	Success        bool
 	ActualGasCost  string // numeric
