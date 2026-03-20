@@ -14,6 +14,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -24,8 +31,7 @@ func main() {
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		slog.Error("DATABASE_URL is not set")
-		os.Exit(1)
+		return fmt.Errorf("DATABASE_URL is not set")
 	}
 
 	// Connect to PostgreSQL and run pending migrations.
@@ -35,14 +41,12 @@ func main() {
 
 	pool, err := db.Connect(startupCtx, databaseURL)
 	if err != nil {
-		slog.Error("failed to connect to database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer pool.Close()
 
 	if err := db.Migrate(startupCtx, pool); err != nil {
-		slog.Error("failed to run migrations", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("run migrations: %w", err)
 	}
 
 	mux := http.NewServeMux()
@@ -83,7 +87,7 @@ func main() {
 
 	slog.Info("indexer API listening", "port", port)
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		slog.Error("server error", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("server: %w", err)
 	}
+	return nil
 }
