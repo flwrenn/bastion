@@ -4,9 +4,10 @@
 --   user_operations — indexed UserOperationEvent data from EntryPoint v0.7.
 --   indexer_state   — key-value store for indexer cursor / checkpoint.
 --
--- user_operations fields come from two sources:
+-- user_operations fields come from three sources:
 --   Event topics/data: user_op_hash, sender, paymaster, nonce, success,
 --                      actual_gas_cost, actual_gas_used
+--   Decoded calldata:  target, calldata
 --   Transaction context: tx_hash, block_number, block_timestamp, log_index
 
 CREATE TABLE IF NOT EXISTS user_operations (
@@ -14,6 +15,8 @@ CREATE TABLE IF NOT EXISTS user_operations (
     user_op_hash     BYTEA        NOT NULL CHECK (octet_length(user_op_hash) = 32),
     sender           BYTEA        NOT NULL CHECK (octet_length(sender) = 20),
     paymaster        BYTEA        NOT NULL CHECK (octet_length(paymaster) = 20),
+    target           BYTEA        CHECK (octet_length(target) = 20),
+    calldata         BYTEA,
     nonce            NUMERIC      NOT NULL,
     success          BOOLEAN      NOT NULL,
     actual_gas_cost  NUMERIC      NOT NULL,
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS user_operations (
 CREATE INDEX IF NOT EXISTS idx_user_operations_sender       ON user_operations (sender);
 CREATE INDEX IF NOT EXISTS idx_user_operations_block_number ON user_operations (block_number);
 CREATE INDEX IF NOT EXISTS idx_user_operations_user_op_hash ON user_operations (user_op_hash);
+CREATE INDEX IF NOT EXISTS idx_user_operations_target       ON user_operations (target);
 
 -- Tracks which block the indexer has processed up to, enabling
 -- resumable backfill and gap detection after restarts.
