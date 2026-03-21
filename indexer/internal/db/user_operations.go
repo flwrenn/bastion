@@ -67,7 +67,18 @@ func ReplaceOperationsAndSetCursor(
 			VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 			)
-			ON CONFLICT (tx_hash, log_index) DO NOTHING
+			ON CONFLICT (tx_hash, log_index) DO UPDATE SET
+				user_op_hash = EXCLUDED.user_op_hash,
+				sender = EXCLUDED.sender,
+				paymaster = EXCLUDED.paymaster,
+				target = EXCLUDED.target,
+				calldata = EXCLUDED.calldata,
+				nonce = EXCLUDED.nonce,
+				success = EXCLUDED.success,
+				actual_gas_cost = EXCLUDED.actual_gas_cost,
+				actual_gas_used = EXCLUDED.actual_gas_used,
+				block_number = EXCLUDED.block_number,
+				block_timestamp = EXCLUDED.block_timestamp
 		`,
 			op.UserOpHash,
 			op.Sender,
