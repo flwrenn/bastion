@@ -77,6 +77,21 @@ go build ./cmd/indexer
 go run ./cmd/indexer   # Starts on http://localhost:3001
 ```
 
+Required env vars:
+
+- `DATABASE_URL` — PostgreSQL DSN
+- `RPC_URL` — chain JSON-RPC endpoint
+
+Optional indexer env vars:
+
+- `ENTRYPOINT` — override EntryPoint address (default: canonical v0.7)
+- `INDEXER_START_BLOCK` — initial block when no cursor exists
+- `INDEXER_BATCH_SIZE` — max block span per `eth_getLogs` batch (default `500`)
+- `INDEXER_CONFIRMATIONS` — confirmation lag before indexing (default `3`)
+- `INDEXER_REORG_WINDOW` — rewind window from cursor each loop (default = confirmations)
+- `INDEXER_POLL_INTERVAL` — polling interval (default `4s`)
+- `INDEXER_REQUEST_TIMEOUT` — per-RPC request timeout (default `15s`)
+
 ### Makefile (all components)
 
 ```sh

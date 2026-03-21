@@ -1,0 +1,118 @@
+package indexer
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	defaultEntryPoint     = "0x0000000071727de22e5e9d8baf0edac6f37da032"
+	defaultBatchSize      = uint64(500)
+	defaultConfirmations  = uint64(3)
+	defaultPollInterval   = 4 * time.Second
+	defaultRequestTimeout = 15 * time.Second
+
+	stateKeyLastIndexedBlock = "user_operations.last_indexed_block"
+)
+
+type Config struct {
+	RPCURL         string
+	EntryPoint     string
+	StartBlock     uint64
+	HasStartBlock  bool
+	BatchSize      uint64
+	Confirmations  uint64
+	ReorgWindow    uint64
+	PollInterval   time.Duration
+	RequestTimeout time.Duration
+	StateKey       string
+}
+
+func LoadConfigFromEnv() (Config, error) {
+	cfg := Config{
+		RPCURL:         strings.TrimSpace(os.Getenv("RPC_URL")),
+		EntryPoint:     defaultEntryPoint,
+		BatchSize:      defaultBatchSize,
+		Confirmations:  defaultConfirmations,
+		PollInterval:   defaultPollInterval,
+		RequestTimeout: defaultRequestTimeout,
+		StateKey:       stateKeyLastIndexedBlock,
+	}
+
+	if cfg.RPCURL == "" {
+		return Config{}, fmt.Errorf("RPC_URL is not set")
+	}
+
+	if value := strings.TrimSpace(os.Getenv("ENTRYPOINT")); value != "" {
+		normalized, err := normalizeAddress(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse ENTRYPOINT: %w", err)
+		}
+		cfg.EntryPoint = normalized
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_START_BLOCK")); value != "" {
+		start, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_START_BLOCK: %w", err)
+		}
+		cfg.StartBlock = start
+		cfg.HasStartBlock = true
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_BATCH_SIZE")); value != "" {
+		batchSize, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_BATCH_SIZE: %w", err)
+		}
+		if batchSize == 0 {
+			return Config{}, fmt.Errorf("INDEXER_BATCH_SIZE must be greater than 0")
+		}
+		cfg.BatchSize = batchSize
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_CONFIRMATIONS")); value != "" {
+		confirmations, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_CONFIRMATIONS: %w", err)
+		}
+		cfg.Confirmations = confirmations
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_REORG_WINDOW")); value != "" {
+		reorgWindow, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_REORG_WINDOW: %w", err)
+		}
+		cfg.ReorgWindow = reorgWindow
+	} else {
+		cfg.ReorgWindow = cfg.Confirmations
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_POLL_INTERVAL")); value != "" {
+		pollInterval, err := time.ParseDuration(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_POLL_INTERVAL: %w", err)
+		}
+		if pollInterval <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_POLL_INTERVAL must be greater than 0")
+		}
+		cfg.PollInterval = pollInterval
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_REQUEST_TIMEOUT")); value != "" {
+		timeout, err := time.ParseDuration(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_REQUEST_TIMEOUT: %w", err)
+		}
+		if timeout <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_REQUEST_TIMEOUT must be greater than 0")
+		}
+		cfg.RequestTimeout = timeout
+	}
+
+	return cfg, nil
+}
