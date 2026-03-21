@@ -136,22 +136,31 @@ func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint
 		return fmt.Errorf("fetch logs [%d,%d]: %w", fromBlock, toBlock, err)
 	}
 
-	txMetaByHash, err := s.loadTransactionOperationMeta(ctx, logs)
-	if err != nil {
-		return fmt.Errorf("load transaction metadata: %w", err)
-	}
-
-	blockTimestamps, err := s.loadBlockTimestamps(ctx, logs)
-	if err != nil {
-		return fmt.Errorf("load block timestamps: %w", err)
-	}
-
-	operations := make([]db.UserOperation, 0, len(logs))
+	activeLogs := make([]rpcLog, 0, len(logs))
 	for i := range logs {
-		log := logs[i]
-		if log.Removed {
+		if logs[i].Removed {
 			continue
 		}
+		activeLogs = append(activeLogs, logs[i])
+	}
+
+	txMetaByHash := make(map[string]map[string][]operationMeta)
+	blockTimestamps := make(map[uint64]int64)
+	if len(activeLogs) > 0 {
+		txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeLogs)
+		if err != nil {
+			return fmt.Errorf("load transaction metadata: %w", err)
+		}
+
+		blockTimestamps, err = s.loadBlockTimestamps(ctx, activeLogs)
+		if err != nil {
+			return fmt.Errorf("load block timestamps: %w", err)
+		}
+	}
+
+	operations := make([]db.UserOperation, 0, len(activeLogs))
+	for i := range activeLogs {
+		log := activeLogs[i]
 
 		event, err := decodeUserOperationEventLog(log)
 		if err != nil {
