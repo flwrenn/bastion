@@ -1,0 +1,65 @@
+package indexer
+
+import "testing"
+
+func TestPlanScanRange_NoCursor_NoStartBlock(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{}}
+	from, to, ok := svc.planScanRange(0, false, 100)
+	if !ok {
+		t.Fatal("expected scan range to be available")
+	}
+	if from != 100 || to != 100 {
+		t.Fatalf("expected range [100,100], got [%d,%d]", from, to)
+	}
+}
+
+func TestPlanScanRange_NoCursor_WithStartBlock(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{HasStartBlock: true, StartBlock: 42}}
+	from, to, ok := svc.planScanRange(0, false, 100)
+	if !ok {
+		t.Fatal("expected scan range to be available")
+	}
+	if from != 42 || to != 100 {
+		t.Fatalf("expected range [42,100], got [%d,%d]", from, to)
+	}
+}
+
+func TestPlanScanRange_WithCursorAndReorgWindow(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{ReorgWindow: 5}}
+	from, to, ok := svc.planScanRange(20, true, 30)
+	if !ok {
+		t.Fatal("expected scan range to be available")
+	}
+	if from != 15 || to != 30 {
+		t.Fatalf("expected range [15,30], got [%d,%d]", from, to)
+	}
+}
+
+func TestPlanScanRange_ClampsCursorToSafeHead(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{ReorgWindow: 3}}
+	from, to, ok := svc.planScanRange(200, true, 50)
+	if !ok {
+		t.Fatal("expected scan range to be available")
+	}
+	if from != 47 || to != 50 {
+		t.Fatalf("expected range [47,50], got [%d,%d]", from, to)
+	}
+}
+
+func TestPlanScanRange_StartBlockAboveSafeHead(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{HasStartBlock: true, StartBlock: 1000}}
+	_, _, ok := svc.planScanRange(0, false, 100)
+	if ok {
+		t.Fatal("expected no scan range when start block > safe head")
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
+	"github.com/flwrenn/bastion/indexer/internal/indexer"
 )
 
 func main() {
@@ -34,6 +35,11 @@ func run() error {
 		return fmt.Errorf("DATABASE_URL is not set")
 	}
 
+	indexerConfig, err := indexer.LoadConfigFromEnv()
+	if err != nil {
+		return fmt.Errorf("load indexer config: %w", err)
+	}
+
 	// Connect to PostgreSQL and run pending migrations.
 	// Bounded so the process fails fast if the DB is unreachable.
 	startupCtx, startupCancel := context.WithTimeout(ctx, 15*time.Second)
@@ -48,6 +54,19 @@ func run() error {
 	if err := db.Migrate(startupCtx, pool); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
+
+	svc, err := indexer.New(indexerConfig, pool)
+	if err != nil {
+		return fmt.Errorf("init indexer service: %w", err)
+	}
+
+	workerErrCh := make(chan error, 1)
+	go func() {
+		if runErr := svc.Run(ctx); runErr != nil {
+			workerErrCh <- runErr
+			cancel()
+		}
+	}()
 
 	mux := http.NewServeMux()
 
@@ -89,5 +108,14 @@ func run() error {
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("server: %w", err)
 	}
+
+	select {
+	case workerErr := <-workerErrCh:
+		if workerErr != nil {
+			return fmt.Errorf("indexer worker: %w", workerErr)
+		}
+	default:
+	}
+
 	return nil
 }
