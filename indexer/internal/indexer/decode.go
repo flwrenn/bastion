@@ -128,7 +128,7 @@ func decodeHandleOpsInput(input []byte) ([]operationCall, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse ops offset: %w", err)
 	}
-	if opsOffset+32 > len(args) {
+	if opsOffset > len(args)-32 {
 		return nil, fmt.Errorf("ops offset %d out of bounds", opsOffset)
 	}
 
@@ -143,8 +143,8 @@ func decodeHandleOpsInput(input []byte) ([]operationCall, error) {
 	}
 
 	offsetsBase := arrayStart + 32
-	requiredOffsetsEnd := offsetsBase + arrayLen*32
-	if requiredOffsetsEnd > len(args) {
+	maxOffsets := (len(args) - offsetsBase) / 32
+	if arrayLen > maxOffsets {
 		return nil, fmt.Errorf("ops offsets exceed calldata length")
 	}
 
@@ -157,6 +157,9 @@ func decodeHandleOpsInput(input []byte) ([]operationCall, error) {
 		relOffset, err := wordToOffset(offsetWord)
 		if err != nil {
 			return nil, fmt.Errorf("parse op[%d] offset: %w", i, err)
+		}
+		if relOffset > len(args)-offsetsBase {
+			return nil, fmt.Errorf("op[%d] tuple offset %d out of bounds", i, relOffset)
 		}
 
 		tupleStart := offsetsBase + relOffset

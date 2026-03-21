@@ -108,6 +108,37 @@ func TestDecodeHandleOpsInputSkipsExecuteWithNonZeroValue(t *testing.T) {
 	}
 }
 
+func TestDecodeHandleOpsInputRejectsOversizedArrayLen(t *testing.T) {
+	t.Parallel()
+
+	selector := []byte{0x76, 0x5e, 0x82, 0x7f}
+	args := make([]byte, 64)
+	copy(args[0:32], uintWord(32))
+	copy(args[32:64], uintWord(2))
+
+	input := append(selector, args...)
+	_, err := decodeHandleOpsInput(input)
+	if err == nil {
+		t.Fatal("expected error for oversized ops array length")
+	}
+}
+
+func TestDecodeHandleOpsInputRejectsTupleOffsetOutOfBounds(t *testing.T) {
+	t.Parallel()
+
+	selector := []byte{0x76, 0x5e, 0x82, 0x7f}
+	args := make([]byte, 32*4)
+	copy(args[0:32], uintWord(64))
+	copy(args[64:96], uintWord(1))
+	copy(args[96:128], uintWord(1000))
+
+	input := append(selector, args...)
+	_, err := decodeHandleOpsInput(input)
+	if err == nil {
+		t.Fatal("expected error for tuple offset out of bounds")
+	}
+}
+
 func hexWord(value uint64) string {
 	return fmt.Sprintf("%064x", value)
 }
