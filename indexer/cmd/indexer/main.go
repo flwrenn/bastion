@@ -60,12 +60,13 @@ func run() error {
 		return fmt.Errorf("init indexer service: %w", err)
 	}
 
-	workerErrCh := make(chan error, 1)
+	workerResultCh := make(chan error, 1)
 	go func() {
-		if runErr := svc.Run(ctx); runErr != nil {
-			workerErrCh <- runErr
+		runErr := svc.Run(ctx)
+		if runErr != nil {
 			cancel()
 		}
+		workerResultCh <- runErr
 	}()
 
 	mux := http.NewServeMux()
@@ -105,16 +106,22 @@ func run() error {
 	}()
 
 	slog.Info("indexer API listening", "port", port)
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		return fmt.Errorf("server: %w", err)
+	listenErr := srv.ListenAndServe()
+	if listenErr != nil && listenErr != http.ErrServerClosed {
+		cancel()
 	}
 
-	select {
-	case workerErr := <-workerErrCh:
+	workerErr := <-workerResultCh
+
+	if listenErr != nil && listenErr != http.ErrServerClosed {
 		if workerErr != nil {
-			return fmt.Errorf("indexer worker: %w", workerErr)
+			return fmt.Errorf("server: %w (indexer worker: %v)", listenErr, workerErr)
 		}
-	default:
+		return fmt.Errorf("server: %w", listenErr)
+	}
+
+	if workerErr != nil {
+		return fmt.Errorf("indexer worker: %w", workerErr)
 	}
 
 	return nil
