@@ -9,7 +9,10 @@ import (
 	"net/http"
 )
 
-const jsonRPCVersion = "2.0"
+const (
+	jsonRPCVersion     = "2.0"
+	maxRPCResponseSize = 8 * 1024 * 1024
+)
 
 type rpcClient struct {
 	url        string
@@ -90,9 +93,12 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 	}
 	defer httpResp.Body.Close()
 
-	body, err := io.ReadAll(httpResp.Body)
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxRPCResponseSize+1))
 	if err != nil {
 		return fmt.Errorf("read rpc response %s: %w", method, err)
+	}
+	if len(body) > maxRPCResponseSize {
+		return fmt.Errorf("rpc %s response exceeds %d bytes", method, maxRPCResponseSize)
 	}
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {

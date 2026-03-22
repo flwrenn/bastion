@@ -18,3 +18,20 @@ func TestRunReturnsNilWhenContextCancelledBeforeInitialIteration(t *testing.T) {
 		t.Fatalf("expected nil error on canceled context, got %v", err)
 	}
 }
+
+func TestRunReturnsErrorWhenInitialIterationFails(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		cfg: Config{
+			PollInterval:   time.Millisecond,
+			RequestTimeout: time.Millisecond,
+		},
+		rpc: newRPCClient("http://127.0.0.1:1"),
+	}
+
+	err := svc.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected initial iteration error")
+	}
+}
