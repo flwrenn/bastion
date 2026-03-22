@@ -3,9 +3,9 @@ package db
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
+	"github.com/flwrenn/bastion/indexer/internal/numconv"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -125,8 +125,5 @@ func ReplaceOperationsAndSetCursor(
 }
 
 func toInt64(v uint64) (int64, error) {
-	if v > math.MaxInt64 {
-		return 0, fmt.Errorf("value %d overflows int64", v)
-	}
-	return int64(v), nil
+	return numconv.Uint64ToInt64(v)
 }

@@ -3,9 +3,10 @@ package indexer
 import (
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
+
+	"github.com/flwrenn/bastion/indexer/internal/numconv"
 )
 
 func normalizeAddress(input string) (string, error) {
@@ -77,9 +78,5 @@ func hasHexPrefix(value string) bool {
 }
 
 func toInt64(value uint64) (int64, error) {
-	if value > math.MaxInt64 {
-		return 0, fmt.Errorf("value %d overflows int64", value)
-	}
-
-	return int64(value), nil
+	return numconv.Uint64ToInt64(value)
 }
