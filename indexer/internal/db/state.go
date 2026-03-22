@@ -12,6 +12,10 @@ import (
 )
 
 func GetState(ctx context.Context, pool *pgxpool.Pool, key string) (string, bool, error) {
+	if pool == nil {
+		return "", false, fmt.Errorf("pool is required")
+	}
+
 	var value string
 	err := pool.QueryRow(ctx, "SELECT value FROM indexer_state WHERE key = $1", key).Scan(&value)
 	if err != nil {
@@ -60,6 +64,10 @@ func TrimOperationsAboveBlockAndSetCursor(
 	stateKey string,
 	safeHead uint64,
 ) error {
+	if pool == nil {
+		return fmt.Errorf("pool is required")
+	}
+
 	if safeHead > math.MaxInt64 {
 		return fmt.Errorf("safe head %d overflows int64", safeHead)
 	}

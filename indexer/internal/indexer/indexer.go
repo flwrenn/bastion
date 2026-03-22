@@ -280,8 +280,13 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 
 		event, err := decodeUserOperationEventLog(log)
 		if err != nil {
-			slog.Warn("skip malformed user operation event", "err", err, "tx_hash", log.TransactionHash)
-			continue
+			return fmt.Errorf(
+				"decode user operation event tx %s block %s log_index %s: %w",
+				log.TransactionHash,
+				log.BlockNumber,
+				log.LogIndex,
+				err,
+			)
 		}
 
 		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
