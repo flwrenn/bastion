@@ -34,7 +34,10 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 
 func (s *Service) Run(ctx context.Context) error {
 	if err := s.indexOnce(ctx); err != nil {
-		return err
+		if ctx.Err() != nil {
+			return nil
+		}
+		slog.Error("initial index iteration failed", "err", err)
 	}
 
 	ticker := time.NewTicker(s.cfg.PollInterval)
@@ -46,6 +49,9 @@ func (s *Service) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := s.indexOnce(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				slog.Error("index iteration failed", "err", err)
 			}
 		}
@@ -89,6 +95,10 @@ func (s *Service) indexOnce(ctx context.Context) error {
 }
 
 func (s *Service) safeHead(ctx context.Context) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
 	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
 	defer cancel()
 
