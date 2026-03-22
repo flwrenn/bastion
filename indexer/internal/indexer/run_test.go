@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestRunReturnsNilWhenContextCancelledBeforeInitialIteration(t *testing.T) {
@@ -37,6 +39,23 @@ func TestRunReturnsErrorWhenInitialIterationFails(t *testing.T) {
 	}
 }
 
+func TestRunReturnsErrorWhenPoolIsNil(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		cfg: Config{PollInterval: time.Second},
+		rpc: newRPCClient("http://127.0.0.1:1"),
+	}
+
+	err := svc.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error when pool is nil")
+	}
+	if !strings.Contains(err.Error(), "pool is required") {
+		t.Fatalf("expected pool error, got %v", err)
+	}
+}
+
 func TestNewRejectsInvalidConfig(t *testing.T) {
 	t.Parallel()
 
@@ -45,6 +64,20 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		cfg     Config
 		wantErr string
 	}{
+		{
+			name: "nil pool",
+			cfg: Config{
+				RPCURL:             "http://127.0.0.1:8545",
+				EntryPoint:         defaultEntryPoint,
+				PollInterval:       time.Second,
+				BatchSize:          1,
+				RequestTimeout:     time.Second,
+				RPCConcurrency:     1,
+				EnableTxEnrichment: true,
+				StateKey:           stateKeyLastIndexedBlock,
+			},
+			wantErr: "pool is required",
+		},
 		{
 			name: "missing rpc url",
 			cfg: Config{
@@ -135,7 +168,12 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := New(tt.cfg, nil)
+			pool := &pgxpool.Pool{}
+			if tt.name == "nil pool" {
+				pool = nil
+			}
+
+			_, err := New(tt.cfg, pool)
 			if err == nil {
 				t.Fatalf("expected error containing %q", tt.wantErr)
 			}

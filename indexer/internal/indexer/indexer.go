@@ -43,6 +43,9 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	if cfg.StateKey == "" {
 		return nil, fmt.Errorf("StateKey is required")
 	}
+	if pool == nil {
+		return nil, fmt.Errorf("pool is required")
+	}
 
 	normalizedEntryPoint, err := normalizeAddress(cfg.EntryPoint)
 	if err != nil {
@@ -59,6 +62,19 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 }
 
 func (s *Service) Run(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return nil
+	}
+	if s.cfg.PollInterval <= 0 {
+		return fmt.Errorf("PollInterval must be greater than 0")
+	}
+	if s.pool == nil {
+		return fmt.Errorf("pool is required")
+	}
+	if s.rpc == nil {
+		return fmt.Errorf("rpc client is required")
+	}
+
 	if err := s.indexOnce(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
