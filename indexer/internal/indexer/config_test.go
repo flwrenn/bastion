@@ -75,6 +75,9 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	if cfg.RPCConcurrency != defaultRPCConcurrency {
 		t.Fatalf("expected default rpc concurrency %d, got %d", defaultRPCConcurrency, cfg.RPCConcurrency)
 	}
+	if cfg.RPCResponseMaxBytes != defaultRPCResponseMax {
+		t.Fatalf("expected default rpc response max %d, got %d", defaultRPCResponseMax, cfg.RPCResponseMaxBytes)
+	}
 	if !cfg.EnableTxEnrichment {
 		t.Fatal("expected tx enrichment to be enabled by default")
 	}
@@ -96,6 +99,7 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	t.Setenv("INDEXER_POLL_INTERVAL", "750ms")
 	t.Setenv("INDEXER_REQUEST_TIMEOUT", "9s")
 	t.Setenv("INDEXER_RPC_CONCURRENCY", "12")
+	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "1048576")
 	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "false")
 	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "true")
 
@@ -124,6 +128,9 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	}
 	if cfg.RPCConcurrency != 12 {
 		t.Fatalf("expected rpc concurrency 12, got %d", cfg.RPCConcurrency)
+	}
+	if cfg.RPCResponseMaxBytes != 1048576 {
+		t.Fatalf("expected rpc response max 1048576, got %d", cfg.RPCResponseMaxBytes)
 	}
 	if cfg.EnableTxEnrichment {
 		t.Fatal("expected tx enrichment to be disabled")
@@ -164,6 +171,17 @@ func TestLoadConfigFromEnv_InvalidNumericValues(t *testing.T) {
 	if _, err := LoadConfigFromEnv(); err == nil {
 		t.Fatal("expected rpc concurrency parse error")
 	}
+
+	t.Setenv("INDEXER_RPC_CONCURRENCY", "8")
+	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "0")
+	if _, err := LoadConfigFromEnv(); err == nil {
+		t.Fatal("expected rpc response max validation error")
+	}
+
+	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "abc")
+	if _, err := LoadConfigFromEnv(); err == nil {
+		t.Fatal("expected rpc response max parse error")
+	}
 }
 
 func TestLoadConfigFromEnv_InvalidDurationsAndBools(t *testing.T) {
@@ -203,6 +221,7 @@ func clearOptionalIndexerEnv(t *testing.T) {
 	t.Setenv("INDEXER_POLL_INTERVAL", "")
 	t.Setenv("INDEXER_REQUEST_TIMEOUT", "")
 	t.Setenv("INDEXER_RPC_CONCURRENCY", "")
+	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "")
 	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "")
 	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "")
 }

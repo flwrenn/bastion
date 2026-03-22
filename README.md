@@ -92,6 +92,7 @@ Optional indexer env vars:
 - `INDEXER_POLL_INTERVAL` — polling interval (default `4s`)
 - `INDEXER_REQUEST_TIMEOUT` — per-RPC request timeout (default `15s`)
 - `INDEXER_RPC_CONCURRENCY` — max concurrent RPC calls for tx/block enrichment (default `8`)
+- `INDEXER_RPC_RESPONSE_MAX_BYTES` — max RPC response size before adaptive range splitting (default `8388608`)
 - `INDEXER_ENABLE_TX_ENRICHMENT` — toggle tx input decoding for `target`/`calldata` enrichment (default `true`)
 - `INDEXER_ALLOW_CURSOR_TRIM` — allow destructive trim when cursor is ahead of safe head (default `false`)
 
