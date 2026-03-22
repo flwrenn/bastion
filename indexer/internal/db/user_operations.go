@@ -52,6 +52,13 @@ func ReplaceOperationsAndSetCursor(
 	cursor uint64,
 	operations []UserOperation,
 ) error {
+	if stateKey == "" {
+		return fmt.Errorf("state key is required")
+	}
+	if pool == nil {
+		return fmt.Errorf("pool is required")
+	}
+
 	if fromBlock > toBlock {
 		return fmt.Errorf("invalid block range: from %d > to %d", fromBlock, toBlock)
 	}
