@@ -44,7 +44,7 @@ func (s *Service) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		slog.Error("initial index iteration failed", "err", err)
+		return fmt.Errorf("initial index iteration failed: %w", err)
 	}
 
 	ticker := time.NewTicker(s.cfg.PollInterval)
@@ -74,6 +74,19 @@ func (s *Service) indexOnce(ctx context.Context) error {
 	cursor, hasCursor, err := db.GetStateUint64(ctx, s.pool, s.cfg.StateKey)
 	if err != nil {
 		return fmt.Errorf("load cursor: %w", err)
+	}
+	if hasCursor && cursor > safeHead {
+		slog.Warn(
+			"cursor ahead of safe head; trimming future rows",
+			"cursor",
+			cursor,
+			"safe_head",
+			safeHead,
+		)
+		if err := db.TrimOperationsAboveBlockAndSetCursor(ctx, s.pool, s.cfg.StateKey, safeHead); err != nil {
+			return fmt.Errorf("reconcile cursor to safe head: %w", err)
+		}
+		cursor = safeHead
 	}
 
 	from, to, ok := s.planScanRange(cursor, hasCursor, safeHead)
