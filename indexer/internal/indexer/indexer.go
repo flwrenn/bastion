@@ -25,6 +25,25 @@ type Service struct {
 const blockTimestampCacheMaxEntries = 4096
 
 func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
+	if cfg.RPCURL == "" {
+		return nil, fmt.Errorf("RPCURL is required")
+	}
+	if cfg.PollInterval <= 0 {
+		return nil, fmt.Errorf("PollInterval must be greater than 0")
+	}
+	if cfg.BatchSize == 0 {
+		return nil, fmt.Errorf("BatchSize must be greater than 0")
+	}
+	if cfg.RequestTimeout <= 0 {
+		return nil, fmt.Errorf("RequestTimeout must be greater than 0")
+	}
+	if cfg.RPCConcurrency <= 0 {
+		return nil, fmt.Errorf("RPCConcurrency must be greater than 0")
+	}
+	if cfg.StateKey == "" {
+		return nil, fmt.Errorf("StateKey is required")
+	}
+
 	normalizedEntryPoint, err := normalizeAddress(cfg.EntryPoint)
 	if err != nil {
 		return nil, fmt.Errorf("normalize entrypoint: %w", err)
@@ -76,12 +95,28 @@ func (s *Service) indexOnce(ctx context.Context) error {
 		return fmt.Errorf("load cursor: %w", err)
 	}
 	if hasCursor && cursor > safeHead {
+		delta := cursor - safeHead
+		if !s.cfg.AllowCursorTrim {
+			slog.Warn(
+				"cursor ahead of safe head; skipping iteration",
+				"cursor",
+				cursor,
+				"safe_head",
+				safeHead,
+				"delta",
+				delta,
+			)
+			return nil
+		}
+
 		slog.Warn(
 			"cursor ahead of safe head; trimming future rows",
 			"cursor",
 			cursor,
 			"safe_head",
 			safeHead,
+			"delta",
+			delta,
 		)
 		if err := db.TrimOperationsAboveBlockAndSetCursor(ctx, s.pool, s.cfg.StateKey, safeHead); err != nil {
 			return fmt.Errorf("reconcile cursor to safe head: %w", err)

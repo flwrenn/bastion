@@ -78,6 +78,9 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 	if !cfg.EnableTxEnrichment {
 		t.Fatal("expected tx enrichment to be enabled by default")
 	}
+	if cfg.AllowCursorTrim {
+		t.Fatal("expected cursor trim to be disabled by default")
+	}
 	if cfg.StateKey != stateKeyLastIndexedBlock {
 		t.Fatalf("expected state key %q, got %q", stateKeyLastIndexedBlock, cfg.StateKey)
 	}
@@ -94,6 +97,7 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	t.Setenv("INDEXER_REQUEST_TIMEOUT", "9s")
 	t.Setenv("INDEXER_RPC_CONCURRENCY", "12")
 	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "false")
+	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "true")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -123,6 +127,9 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	}
 	if cfg.EnableTxEnrichment {
 		t.Fatal("expected tx enrichment to be disabled")
+	}
+	if !cfg.AllowCursorTrim {
+		t.Fatal("expected cursor trim to be enabled")
 	}
 }
 
@@ -178,6 +185,12 @@ func TestLoadConfigFromEnv_InvalidDurationsAndBools(t *testing.T) {
 	if _, err := LoadConfigFromEnv(); err == nil {
 		t.Fatal("expected tx enrichment parse error")
 	}
+
+	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "true")
+	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "maybe")
+	if _, err := LoadConfigFromEnv(); err == nil {
+		t.Fatal("expected cursor trim parse error")
+	}
 }
 
 func clearOptionalIndexerEnv(t *testing.T) {
@@ -191,4 +204,5 @@ func clearOptionalIndexerEnv(t *testing.T) {
 	t.Setenv("INDEXER_REQUEST_TIMEOUT", "")
 	t.Setenv("INDEXER_RPC_CONCURRENCY", "")
 	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "")
+	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "")
 }

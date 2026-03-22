@@ -31,6 +31,7 @@ type Config struct {
 	RequestTimeout     time.Duration
 	RPCConcurrency     int
 	EnableTxEnrichment bool
+	AllowCursorTrim    bool
 	StateKey           string
 }
 
@@ -136,6 +137,14 @@ func LoadConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("parse INDEXER_ENABLE_TX_ENRICHMENT: %w", err)
 		}
 		cfg.EnableTxEnrichment = enabled
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_ALLOW_CURSOR_TRIM")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_ALLOW_CURSOR_TRIM: %w", err)
+		}
+		cfg.AllowCursorTrim = enabled
 	}
 
 	return cfg, nil
