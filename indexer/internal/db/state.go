@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -48,6 +49,40 @@ func setStateTx(ctx context.Context, tx pgx.Tx, key, value string) error {
 	`, key, value)
 	if err != nil {
 		return fmt.Errorf("upsert state %q: %w", key, err)
+	}
+
+	return nil
+}
+
+func TrimOperationsAboveBlockAndSetCursor(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	stateKey string,
+	safeHead uint64,
+) error {
+	if safeHead > math.MaxInt64 {
+		return fmt.Errorf("safe head %d overflows int64", safeHead)
+	}
+
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		"DELETE FROM user_operations WHERE block_number > $1",
+		int64(safeHead),
+	); err != nil {
+		return fmt.Errorf("delete operations above safe head %d: %w", safeHead, err)
+	}
+
+	if err := setStateTx(ctx, tx, stateKey, strconv.FormatUint(safeHead, 10)); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
 	}
 
 	return nil
