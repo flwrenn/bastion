@@ -4,19 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 )
 
-const (
-	jsonRPCVersion     = "2.0"
-	maxRPCResponseSize = 8 * 1024 * 1024
-)
+const jsonRPCVersion = "2.0"
+
+var errRPCResponseTooLarge = errors.New("rpc response exceeds size limit")
 
 type rpcClient struct {
-	url        string
-	httpClient *http.Client
+	url              string
+	maxResponseBytes int64
+	httpClient       *http.Client
 }
 
 type rpcRequest struct {
@@ -59,9 +60,10 @@ type rpcBlock struct {
 	Timestamp string `json:"timestamp"`
 }
 
-func newRPCClient(url string) *rpcClient {
+func newRPCClient(url string, maxResponseBytes int64) *rpcClient {
 	return &rpcClient{
-		url: url,
+		url:              url,
+		maxResponseBytes: maxResponseBytes,
 		httpClient: &http.Client{
 			Timeout: 0,
 		},
@@ -93,12 +95,12 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 	}
 	defer httpResp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxRPCResponseSize+1))
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, c.maxResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read rpc response %s: %w", method, err)
 	}
-	if len(body) > maxRPCResponseSize {
-		return fmt.Errorf("rpc %s response exceeds %d bytes", method, maxRPCResponseSize)
+	if int64(len(body)) > c.maxResponseBytes {
+		return fmt.Errorf("%w: rpc %s response exceeds %d bytes", errRPCResponseTooLarge, method, c.maxResponseBytes)
 	}
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
@@ -123,6 +125,10 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 	}
 
 	return nil
+}
+
+func isRPCResponseTooLarge(err error) bool {
+	return errors.Is(err, errRPCResponseTooLarge)
 }
 
 func (c *rpcClient) latestBlockNumber(ctx context.Context) (uint64, error) {

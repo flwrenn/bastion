@@ -15,37 +15,40 @@ const (
 	defaultPollInterval   = 4 * time.Second
 	defaultRequestTimeout = 15 * time.Second
 	defaultRPCConcurrency = 8
+	defaultRPCResponseMax = 8 * 1024 * 1024
 
 	stateKeyLastIndexedBlock = "user_operations.last_indexed_block"
 )
 
 type Config struct {
-	RPCURL             string
-	EntryPoint         string
-	StartBlock         uint64
-	HasStartBlock      bool
-	BatchSize          uint64
-	Confirmations      uint64
-	ReorgWindow        uint64
-	PollInterval       time.Duration
-	RequestTimeout     time.Duration
-	RPCConcurrency     int
-	EnableTxEnrichment bool
-	AllowCursorTrim    bool
-	StateKey           string
+	RPCURL              string
+	EntryPoint          string
+	StartBlock          uint64
+	HasStartBlock       bool
+	BatchSize           uint64
+	Confirmations       uint64
+	ReorgWindow         uint64
+	PollInterval        time.Duration
+	RequestTimeout      time.Duration
+	RPCConcurrency      int
+	RPCResponseMaxBytes int64
+	EnableTxEnrichment  bool
+	AllowCursorTrim     bool
+	StateKey            string
 }
 
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		RPCURL:             strings.TrimSpace(os.Getenv("RPC_URL")),
-		EntryPoint:         defaultEntryPoint,
-		BatchSize:          defaultBatchSize,
-		Confirmations:      defaultConfirmations,
-		PollInterval:       defaultPollInterval,
-		RequestTimeout:     defaultRequestTimeout,
-		RPCConcurrency:     defaultRPCConcurrency,
-		EnableTxEnrichment: true,
-		StateKey:           stateKeyLastIndexedBlock,
+		RPCURL:              strings.TrimSpace(os.Getenv("RPC_URL")),
+		EntryPoint:          defaultEntryPoint,
+		BatchSize:           defaultBatchSize,
+		Confirmations:       defaultConfirmations,
+		PollInterval:        defaultPollInterval,
+		RequestTimeout:      defaultRequestTimeout,
+		RPCConcurrency:      defaultRPCConcurrency,
+		RPCResponseMaxBytes: defaultRPCResponseMax,
+		EnableTxEnrichment:  true,
+		StateKey:            stateKeyLastIndexedBlock,
 	}
 
 	if cfg.RPCURL == "" {
@@ -129,6 +132,17 @@ func LoadConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("INDEXER_RPC_CONCURRENCY must be greater than 0")
 		}
 		cfg.RPCConcurrency = concurrency
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_RPC_RESPONSE_MAX_BYTES")); value != "" {
+		limit, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_RPC_RESPONSE_MAX_BYTES: %w", err)
+		}
+		if limit <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_RESPONSE_MAX_BYTES must be greater than 0")
+		}
+		cfg.RPCResponseMaxBytes = limit
 	}
 
 	if value := strings.TrimSpace(os.Getenv("INDEXER_ENABLE_TX_ENRICHMENT")); value != "" {

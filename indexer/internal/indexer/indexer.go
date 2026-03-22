@@ -40,6 +40,9 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	if cfg.RPCConcurrency <= 0 {
 		return nil, fmt.Errorf("RPCConcurrency must be greater than 0")
 	}
+	if cfg.RPCResponseMaxBytes <= 0 {
+		return nil, fmt.Errorf("RPCResponseMaxBytes must be greater than 0")
+	}
 	if cfg.StateKey == "" {
 		return nil, fmt.Errorf("StateKey is required")
 	}
@@ -55,7 +58,7 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	return &Service{
 		cfg:                 cfg,
 		pool:                pool,
-		rpc:                 newRPCClient(cfg.RPCURL),
+		rpc:                 newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes),
 		entryPoint:          normalizedEntryPoint,
 		blockTimestampCache: make(map[uint64]int64),
 	}, nil
@@ -101,9 +104,13 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) indexOnce(ctx context.Context) error {
-	safeHead, err := s.safeHead(ctx)
+	safeHead, hasSafeHead, err := s.safeHead(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch safe head: %w", err)
+	}
+	if !hasSafeHead {
+		slog.Debug("indexer idle", "reason", "no_safe_head_yet")
+		return nil
 	}
 
 	cursor, hasCursor, err := db.GetStateUint64(ctx, s.pool, s.cfg.StateKey)
@@ -165,9 +172,9 @@ func (s *Service) indexOnce(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) safeHead(ctx context.Context) (uint64, error) {
+func (s *Service) safeHead(ctx context.Context) (uint64, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
@@ -175,14 +182,14 @@ func (s *Service) safeHead(ctx context.Context) (uint64, error) {
 
 	latest, err := s.rpc.latestBlockNumber(requestCtx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	if latest < s.cfg.Confirmations {
-		return 0, nil
+		return 0, false, nil
 	}
 
-	return latest - s.cfg.Confirmations, nil
+	return latest - s.cfg.Confirmations, true, nil
 }
 
 func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) (uint64, uint64, bool) {
@@ -213,6 +220,25 @@ func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) 
 }
 
 func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+	if fromBlock > toBlock {
+		return fmt.Errorf("invalid block range: from %d > to %d", fromBlock, toBlock)
+	}
+
+	if err := s.indexRangeAttempt(ctx, fromBlock, toBlock); err != nil {
+		if isRPCResponseTooLarge(err) && fromBlock < toBlock {
+			mid := fromBlock + (toBlock-fromBlock)/2
+			if err := s.indexRange(ctx, fromBlock, mid); err != nil {
+				return err
+			}
+			return s.indexRange(ctx, mid+1, toBlock)
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlock uint64) error {
 	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
 	logs, err := s.rpc.getLogs(requestCtx, s.entryPoint, userOperationEventTopic, fromBlock, toBlock)
 	cancel()
