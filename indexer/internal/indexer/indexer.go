@@ -120,6 +120,9 @@ func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) 
 		if cursor > safeHead {
 			cursor = safeHead
 		}
+		if cursor >= safeHead {
+			return 0, 0, false
+		}
 		if cursor > s.cfg.ReorgWindow {
 			from = cursor - s.cfg.ReorgWindow
 		} else {

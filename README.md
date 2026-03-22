@@ -91,6 +91,8 @@ Optional indexer env vars:
 - `INDEXER_REORG_WINDOW` — rewind window from cursor each loop (default = confirmations)
 - `INDEXER_POLL_INTERVAL` — polling interval (default `4s`)
 - `INDEXER_REQUEST_TIMEOUT` — per-RPC request timeout (default `15s`)
+- `INDEXER_RPC_CONCURRENCY` — max concurrent RPC calls for tx/block enrichment (default `8`)
+- `INDEXER_ENABLE_TX_ENRICHMENT` — toggle tx input decoding for `target`/`calldata` enrichment (default `true`)
 
 ### Makefile (all components)
 

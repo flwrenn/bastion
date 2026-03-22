@@ -14,32 +14,37 @@ const (
 	defaultConfirmations  = uint64(3)
 	defaultPollInterval   = 4 * time.Second
 	defaultRequestTimeout = 15 * time.Second
+	defaultRPCConcurrency = 8
 
 	stateKeyLastIndexedBlock = "user_operations.last_indexed_block"
 )
 
 type Config struct {
-	RPCURL         string
-	EntryPoint     string
-	StartBlock     uint64
-	HasStartBlock  bool
-	BatchSize      uint64
-	Confirmations  uint64
-	ReorgWindow    uint64
-	PollInterval   time.Duration
-	RequestTimeout time.Duration
-	StateKey       string
+	RPCURL             string
+	EntryPoint         string
+	StartBlock         uint64
+	HasStartBlock      bool
+	BatchSize          uint64
+	Confirmations      uint64
+	ReorgWindow        uint64
+	PollInterval       time.Duration
+	RequestTimeout     time.Duration
+	RPCConcurrency     int
+	EnableTxEnrichment bool
+	StateKey           string
 }
 
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		RPCURL:         strings.TrimSpace(os.Getenv("RPC_URL")),
-		EntryPoint:     defaultEntryPoint,
-		BatchSize:      defaultBatchSize,
-		Confirmations:  defaultConfirmations,
-		PollInterval:   defaultPollInterval,
-		RequestTimeout: defaultRequestTimeout,
-		StateKey:       stateKeyLastIndexedBlock,
+		RPCURL:             strings.TrimSpace(os.Getenv("RPC_URL")),
+		EntryPoint:         defaultEntryPoint,
+		BatchSize:          defaultBatchSize,
+		Confirmations:      defaultConfirmations,
+		PollInterval:       defaultPollInterval,
+		RequestTimeout:     defaultRequestTimeout,
+		RPCConcurrency:     defaultRPCConcurrency,
+		EnableTxEnrichment: true,
+		StateKey:           stateKeyLastIndexedBlock,
 	}
 
 	if cfg.RPCURL == "" {
@@ -112,6 +117,25 @@ func LoadConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("INDEXER_REQUEST_TIMEOUT must be greater than 0")
 		}
 		cfg.RequestTimeout = timeout
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_RPC_CONCURRENCY")); value != "" {
+		concurrency, err := strconv.Atoi(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_RPC_CONCURRENCY: %w", err)
+		}
+		if concurrency <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_CONCURRENCY must be greater than 0")
+		}
+		cfg.RPCConcurrency = concurrency
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_ENABLE_TX_ENRICHMENT")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_ENABLE_TX_ENRICHMENT: %w", err)
+		}
+		cfg.EnableTxEnrichment = enabled
 	}
 
 	return cfg, nil
