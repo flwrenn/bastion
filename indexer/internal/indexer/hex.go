@@ -10,7 +10,7 @@ import (
 
 func normalizeAddress(input string) (string, error) {
 	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(trimmed, "0x") {
+	if !hasHexPrefix(trimmed) {
 		return "", fmt.Errorf("address must start with 0x")
 	}
 
@@ -28,7 +28,7 @@ func normalizeAddress(input string) (string, error) {
 
 func decodeHex(input string) ([]byte, error) {
 	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(trimmed, "0x") {
+	if !hasHexPrefix(trimmed) {
 		return nil, fmt.Errorf("hex value must start with 0x")
 	}
 
@@ -60,7 +60,7 @@ func decodeHexFixed(input string, length int) ([]byte, error) {
 
 func parseHexUint64(input string) (uint64, error) {
 	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(trimmed, "0x") {
+	if !hasHexPrefix(trimmed) {
 		return 0, fmt.Errorf("hex uint64 must start with 0x")
 	}
 
@@ -70,6 +70,10 @@ func parseHexUint64(input string) (uint64, error) {
 	}
 
 	return value, nil
+}
+
+func hasHexPrefix(value string) bool {
+	return len(value) >= 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')
 }
 
 func toInt64(value uint64) (int64, error) {
