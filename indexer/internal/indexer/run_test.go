@@ -169,6 +169,21 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 			wantErr: "RPCResponseMaxBytes must be greater than 0",
 		},
 		{
+			name: "overflow-prone rpc response size",
+			cfg: Config{
+				RPCURL:              "http://127.0.0.1:8545",
+				EntryPoint:          defaultEntryPoint,
+				PollInterval:        time.Second,
+				BatchSize:           1,
+				RequestTimeout:      time.Second,
+				RPCConcurrency:      1,
+				RPCResponseMaxBytes: int64(^uint64(0) >> 1),
+				EnableTxEnrichment:  true,
+				StateKey:            stateKeyLastIndexedBlock,
+			},
+			wantErr: "RPCResponseMaxBytes must be less than",
+		},
+		{
 			name: "missing state key",
 			cfg: Config{
 				RPCURL:              "http://127.0.0.1:8545",
