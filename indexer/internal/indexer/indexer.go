@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -42,6 +43,9 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	}
 	if cfg.RPCResponseMaxBytes <= 0 {
 		return nil, fmt.Errorf("RPCResponseMaxBytes must be greater than 0")
+	}
+	if cfg.RPCResponseMaxBytes >= math.MaxInt64 {
+		return nil, fmt.Errorf("RPCResponseMaxBytes must be less than %d", math.MaxInt64)
 	}
 	if cfg.StateKey == "" {
 		return nil, fmt.Errorf("StateKey is required")

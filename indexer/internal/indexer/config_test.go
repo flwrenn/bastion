@@ -182,6 +182,11 @@ func TestLoadConfigFromEnv_InvalidNumericValues(t *testing.T) {
 	if _, err := LoadConfigFromEnv(); err == nil {
 		t.Fatal("expected rpc response max parse error")
 	}
+
+	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "9223372036854775807")
+	if _, err := LoadConfigFromEnv(); err == nil {
+		t.Fatal("expected rpc response max overflow-prone validation error")
+	}
 }
 
 func TestLoadConfigFromEnv_InvalidDurationsAndBools(t *testing.T) {

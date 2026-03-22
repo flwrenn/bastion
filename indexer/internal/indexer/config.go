@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -141,6 +142,9 @@ func LoadConfigFromEnv() (Config, error) {
 		}
 		if limit <= 0 {
 			return Config{}, fmt.Errorf("INDEXER_RPC_RESPONSE_MAX_BYTES must be greater than 0")
+		}
+		if limit >= math.MaxInt64 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_RESPONSE_MAX_BYTES must be less than %d", math.MaxInt64)
 		}
 		cfg.RPCResponseMaxBytes = limit
 	}
