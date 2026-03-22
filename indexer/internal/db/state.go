@@ -45,6 +45,10 @@ func GetStateUint64(ctx context.Context, pool *pgxpool.Pool, key string) (uint64
 }
 
 func setStateTx(ctx context.Context, tx pgx.Tx, key, value string) error {
+	if key == "" {
+		return fmt.Errorf("state key is required")
+	}
+
 	_, err := tx.Exec(ctx, `
 		INSERT INTO indexer_state (key, value)
 		VALUES ($1, $2)
@@ -64,6 +68,9 @@ func TrimOperationsAboveBlockAndSetCursor(
 	stateKey string,
 	safeHead uint64,
 ) error {
+	if stateKey == "" {
+		return fmt.Errorf("state key is required")
+	}
 	if pool == nil {
 		return fmt.Errorf("pool is required")
 	}
