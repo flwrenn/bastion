@@ -32,6 +32,18 @@ func TestTrimOperationsAboveBlockAndSetCursorRejectsNilPool(t *testing.T) {
 	}
 }
 
+func TestTrimOperationsAboveBlockAndSetCursorRejectsEmptyStateKey(t *testing.T) {
+	t.Parallel()
+
+	err := TrimOperationsAboveBlockAndSetCursor(context.Background(), nil, "", 1)
+	if err == nil {
+		t.Fatal("expected state key error")
+	}
+	if !strings.Contains(err.Error(), "state key is required") {
+		t.Fatalf("expected state key error, got %v", err)
+	}
+}
+
 func TestTrimOperationsAboveBlockAndSetCursorRejectsOverflow(t *testing.T) {
 	t.Parallel()
 
