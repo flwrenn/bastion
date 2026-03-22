@@ -10,6 +10,39 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const upsertUserOperationSQL = `
+	INSERT INTO user_operations (
+		user_op_hash,
+		sender,
+		paymaster,
+		target,
+		calldata,
+		nonce,
+		success,
+		actual_gas_cost,
+		actual_gas_used,
+		tx_hash,
+		block_number,
+		block_timestamp,
+		log_index
+	)
+	VALUES (
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+	)
+	ON CONFLICT (tx_hash, log_index) DO UPDATE SET
+		user_op_hash = EXCLUDED.user_op_hash,
+		sender = EXCLUDED.sender,
+		paymaster = EXCLUDED.paymaster,
+		target = EXCLUDED.target,
+		calldata = EXCLUDED.calldata,
+		nonce = EXCLUDED.nonce,
+		success = EXCLUDED.success,
+		actual_gas_cost = EXCLUDED.actual_gas_cost,
+		actual_gas_used = EXCLUDED.actual_gas_used,
+		block_number = EXCLUDED.block_number,
+		block_timestamp = EXCLUDED.block_timestamp
+`
+
 func ReplaceOperationsAndSetCursor(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -46,55 +79,37 @@ func ReplaceOperationsAndSetCursor(
 		return fmt.Errorf("delete operations in range [%d,%d]: %w", fromBlock, toBlock, err)
 	}
 
-	for i := range operations {
-		op := operations[i]
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO user_operations (
-				user_op_hash,
-				sender,
-				paymaster,
-				target,
-				calldata,
-				nonce,
-				success,
-				actual_gas_cost,
-				actual_gas_used,
-				tx_hash,
-				block_number,
-				block_timestamp,
-				log_index
+	if len(operations) > 0 {
+		batch := &pgx.Batch{}
+		for i := range operations {
+			op := operations[i]
+			batch.Queue(
+				upsertUserOperationSQL,
+				op.UserOpHash,
+				op.Sender,
+				op.Paymaster,
+				op.Target,
+				op.Calldata,
+				op.Nonce,
+				op.Success,
+				op.ActualGasCost,
+				op.ActualGasUsed,
+				op.TxHash,
+				op.BlockNumber,
+				op.BlockTimestamp,
+				op.LogIndex,
 			)
-			VALUES (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-			)
-			ON CONFLICT (tx_hash, log_index) DO UPDATE SET
-				user_op_hash = EXCLUDED.user_op_hash,
-				sender = EXCLUDED.sender,
-				paymaster = EXCLUDED.paymaster,
-				target = EXCLUDED.target,
-				calldata = EXCLUDED.calldata,
-				nonce = EXCLUDED.nonce,
-				success = EXCLUDED.success,
-				actual_gas_cost = EXCLUDED.actual_gas_cost,
-				actual_gas_used = EXCLUDED.actual_gas_used,
-				block_number = EXCLUDED.block_number,
-				block_timestamp = EXCLUDED.block_timestamp
-		`,
-			op.UserOpHash,
-			op.Sender,
-			op.Paymaster,
-			op.Target,
-			op.Calldata,
-			op.Nonce,
-			op.Success,
-			op.ActualGasCost,
-			op.ActualGasUsed,
-			op.TxHash,
-			op.BlockNumber,
-			op.BlockTimestamp,
-			op.LogIndex,
-		); err != nil {
-			return fmt.Errorf("insert operation at index %d: %w", i, err)
+		}
+
+		results := tx.SendBatch(ctx, batch)
+		for i := range operations {
+			if _, err := results.Exec(); err != nil {
+				_ = results.Close()
+				return fmt.Errorf("insert operation at index %d: %w", i, err)
+			}
+		}
+		if err := results.Close(); err != nil {
+			return fmt.Errorf("close operation batch: %w", err)
 		}
 	}
 
