@@ -41,16 +41,23 @@ func TestPlanScanRange_WithCursorAndReorgWindow(t *testing.T) {
 	}
 }
 
-func TestPlanScanRange_ClampsCursorToSafeHead(t *testing.T) {
+func TestPlanScanRange_CursorAheadOfSafeHeadReturnsNoRange(t *testing.T) {
 	t.Parallel()
 
 	svc := Service{cfg: Config{ReorgWindow: 3}}
-	from, to, ok := svc.planScanRange(200, true, 50)
-	if !ok {
-		t.Fatal("expected scan range to be available")
+	_, _, ok := svc.planScanRange(200, true, 50)
+	if ok {
+		t.Fatal("expected no scan range when cursor is ahead of safe head")
 	}
-	if from != 47 || to != 50 {
-		t.Fatalf("expected range [47,50], got [%d,%d]", from, to)
+}
+
+func TestPlanScanRange_CursorAtSafeHeadReturnsNoRange(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{ReorgWindow: 3}}
+	_, _, ok := svc.planScanRange(50, true, 50)
+	if ok {
+		t.Fatal("expected no scan range when cursor is at safe head")
 	}
 }
 
