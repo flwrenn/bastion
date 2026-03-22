@@ -121,6 +121,7 @@ func (s *Service) indexOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load cursor: %w", err)
 	}
+	trimmedCursor := false
 	if hasCursor && cursor > safeHead {
 		delta := cursor - safeHead
 		if !s.cfg.AllowCursorTrim {
@@ -149,6 +150,16 @@ func (s *Service) indexOnce(ctx context.Context) error {
 			return fmt.Errorf("reconcile cursor to safe head: %w", err)
 		}
 		cursor = safeHead
+		trimmedCursor = true
+	}
+
+	if trimmedCursor {
+		from, to := rewindRangeToSafeHead(safeHead, s.cfg.ReorgWindow)
+		slog.Info("resyncing rewind window after cursor trim", "from", from, "to", to)
+		if err := s.indexRange(ctx, from, to); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	from, to, ok := s.planScanRange(cursor, hasCursor, safeHead)
@@ -194,6 +205,13 @@ func (s *Service) safeHead(ctx context.Context) (uint64, bool, error) {
 	}
 
 	return latest - s.cfg.Confirmations, true, nil
+}
+
+func rewindRangeToSafeHead(safeHead uint64, reorgWindow uint64) (uint64, uint64) {
+	if safeHead > reorgWindow {
+		return safeHead - reorgWindow, safeHead
+	}
+	return 0, safeHead
 }
 
 func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) (uint64, uint64, bool) {

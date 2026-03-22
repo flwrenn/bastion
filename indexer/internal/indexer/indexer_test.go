@@ -70,3 +70,17 @@ func TestPlanScanRange_StartBlockAboveSafeHead(t *testing.T) {
 		t.Fatal("expected no scan range when start block > safe head")
 	}
 }
+
+func TestRewindRangeToSafeHead(t *testing.T) {
+	t.Parallel()
+
+	from, to := rewindRangeToSafeHead(100, 20)
+	if from != 80 || to != 100 {
+		t.Fatalf("expected [80,100], got [%d,%d]", from, to)
+	}
+
+	from, to = rewindRangeToSafeHead(5, 20)
+	if from != 0 || to != 5 {
+		t.Fatalf("expected [0,5], got [%d,%d]", from, to)
+	}
+}
