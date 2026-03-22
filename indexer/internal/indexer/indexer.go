@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
@@ -12,11 +14,15 @@ import (
 )
 
 type Service struct {
-	cfg        Config
-	pool       *pgxpool.Pool
-	rpc        *rpcClient
-	entryPoint string
+	cfg                 Config
+	pool                *pgxpool.Pool
+	rpc                 *rpcClient
+	entryPoint          string
+	blockTimestampCache map[uint64]int64
+	cacheMu             sync.RWMutex
 }
+
+const blockTimestampCacheMaxEntries = 4096
 
 func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	normalizedEntryPoint, err := normalizeAddress(cfg.EntryPoint)
@@ -25,10 +31,11 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	}
 
 	return &Service{
-		cfg:        cfg,
-		pool:       pool,
-		rpc:        newRPCClient(cfg.RPCURL),
-		entryPoint: normalizedEntryPoint,
+		cfg:                 cfg,
+		pool:                pool,
+		rpc:                 newRPCClient(cfg.RPCURL),
+		entryPoint:          normalizedEntryPoint,
+		blockTimestampCache: make(map[uint64]int64),
 	}, nil
 }
 
@@ -160,9 +167,11 @@ func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint
 	txMetaByHash := make(map[string]map[string][]operationMeta)
 	blockTimestamps := make(map[uint64]int64)
 	if len(activeLogs) > 0 {
-		txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeLogs)
-		if err != nil {
-			return fmt.Errorf("load transaction metadata: %w", err)
+		if s.cfg.EnableTxEnrichment {
+			txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeLogs)
+			if err != nil {
+				return fmt.Errorf("load transaction metadata: %w", err)
+			}
 		}
 
 		blockTimestamps, err = s.loadBlockTimestamps(ctx, activeLogs)
@@ -237,33 +246,105 @@ func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint
 
 func (s *Service) loadTransactionOperationMeta(ctx context.Context, logs []rpcLog) (map[string]map[string][]operationMeta, error) {
 	result := make(map[string]map[string][]operationMeta)
+
+	txHashes := make(map[string]string)
 	for i := range logs {
 		log := logs[i]
-		txHash := strings.ToLower(log.TransactionHash)
-		if _, exists := result[txHash]; exists {
+		normalizedTxHash := strings.ToLower(log.TransactionHash)
+		if _, exists := txHashes[normalizedTxHash]; exists {
 			continue
 		}
+		txHashes[normalizedTxHash] = log.TransactionHash
+	}
 
-		requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
-		tx, err := s.rpc.getTransactionByHash(requestCtx, log.TransactionHash)
+	type txJob struct {
+		normalizedHash string
+		rawHash        string
+	}
+
+	workerCount := s.cfg.RPCConcurrency
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > len(txHashes) {
+		workerCount = len(txHashes)
+	}
+	if workerCount == 0 {
+		return result, nil
+	}
+
+	jobs := make(chan txJob)
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	setErr := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
 		cancel()
-		if err != nil {
-			return nil, fmt.Errorf("load tx %s: %w", log.TransactionHash, err)
-		}
+	}
 
-		input, err := decodeHex(tx.Input)
-		if err != nil {
-			return nil, fmt.Errorf("decode tx input %s: %w", tx.Hash, err)
-		}
+	worker := func() {
+		defer wg.Done()
+		for job := range jobs {
+			if workerCtx.Err() != nil {
+				return
+			}
 
-		calls, err := decodeHandleOpsInput(input)
-		if err != nil {
-			slog.Debug("transaction input not handleOps or undecodable", "tx_hash", tx.Hash, "err", err)
-			result[txHash] = map[string][]operationMeta{}
-			continue
-		}
+			requestCtx, requestCancel := context.WithTimeout(workerCtx, s.cfg.RequestTimeout)
+			tx, err := s.rpc.getTransactionByHash(requestCtx, job.rawHash)
+			requestCancel()
+			if err != nil {
+				setErr(fmt.Errorf("load tx %s: %w", job.rawHash, err))
+				return
+			}
 
-		result[txHash] = toOperationMetaQueue(calls)
+			input, err := decodeHex(tx.Input)
+			if err != nil {
+				setErr(fmt.Errorf("decode tx input %s: %w", tx.Hash, err))
+				return
+			}
+
+			calls, err := decodeHandleOpsInput(input)
+			if err != nil {
+				slog.Debug("transaction input not handleOps or undecodable", "tx_hash", tx.Hash, "err", err)
+				mu.Lock()
+				result[job.normalizedHash] = map[string][]operationMeta{}
+				mu.Unlock()
+				continue
+			}
+
+			mu.Lock()
+			result[job.normalizedHash] = toOperationMetaQueue(calls)
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go worker()
+	}
+
+enqueue:
+	for normalizedHash, rawHash := range txHashes {
+		select {
+		case <-workerCtx.Done():
+			break enqueue
+		case jobs <- txJob{normalizedHash: normalizedHash, rawHash: rawHash}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
 	}
 
 	return result, nil
@@ -271,37 +352,152 @@ func (s *Service) loadTransactionOperationMeta(ctx context.Context, logs []rpcLo
 
 func (s *Service) loadBlockTimestamps(ctx context.Context, logs []rpcLog) (map[uint64]int64, error) {
 	result := make(map[uint64]int64)
+	uniqueBlocks := make(map[uint64]struct{})
 	for i := range logs {
 		log := logs[i]
 		blockNumber, err := parseHexUint64(log.BlockNumber)
 		if err != nil {
 			return nil, fmt.Errorf("parse block number %q: %w", log.BlockNumber, err)
 		}
+		uniqueBlocks[blockNumber] = struct{}{}
+	}
 
-		if _, exists := result[blockNumber]; exists {
+	missingBlocks := make([]uint64, 0, len(uniqueBlocks))
+	for blockNumber := range uniqueBlocks {
+		if timestamp, ok := s.getCachedBlockTimestamp(blockNumber); ok {
+			result[blockNumber] = timestamp
 			continue
 		}
+		missingBlocks = append(missingBlocks, blockNumber)
+	}
 
-		requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
-		block, err := s.rpc.getBlockByNumber(requestCtx, blockNumber)
+	if len(missingBlocks) == 0 {
+		return result, nil
+	}
+
+	type blockJob struct {
+		blockNumber uint64
+	}
+
+	workerCount := s.cfg.RPCConcurrency
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > len(missingBlocks) {
+		workerCount = len(missingBlocks)
+	}
+
+	jobs := make(chan blockJob)
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	fetched := make(map[uint64]int64, len(missingBlocks))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	setErr := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
 		cancel()
-		if err != nil {
-			return nil, fmt.Errorf("load block %d: %w", blockNumber, err)
-		}
+	}
 
-		timestampUint, err := parseHexUint64(block.Timestamp)
-		if err != nil {
-			return nil, fmt.Errorf("parse block %d timestamp %q: %w", blockNumber, block.Timestamp, err)
-		}
-		timestampInt64, err := toInt64(timestampUint)
-		if err != nil {
-			return nil, fmt.Errorf("convert block %d timestamp %d: %w", blockNumber, timestampUint, err)
-		}
+	worker := func() {
+		defer wg.Done()
+		for job := range jobs {
+			if workerCtx.Err() != nil {
+				return
+			}
 
-		result[blockNumber] = timestampInt64
+			requestCtx, requestCancel := context.WithTimeout(workerCtx, s.cfg.RequestTimeout)
+			block, err := s.rpc.getBlockByNumber(requestCtx, job.blockNumber)
+			requestCancel()
+			if err != nil {
+				setErr(fmt.Errorf("load block %d: %w", job.blockNumber, err))
+				return
+			}
+
+			timestampUint, err := parseHexUint64(block.Timestamp)
+			if err != nil {
+				setErr(fmt.Errorf("parse block %d timestamp %q: %w", job.blockNumber, block.Timestamp, err))
+				return
+			}
+			timestampInt64, err := toInt64(timestampUint)
+			if err != nil {
+				setErr(fmt.Errorf("convert block %d timestamp %d: %w", job.blockNumber, timestampUint, err))
+				return
+			}
+
+			mu.Lock()
+			fetched[job.blockNumber] = timestampInt64
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go worker()
+	}
+
+enqueue:
+	for i := range missingBlocks {
+		select {
+		case <-workerCtx.Done():
+			break enqueue
+		case jobs <- blockJob{blockNumber: missingBlocks[i]}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	s.storeBlockTimestamps(fetched)
+	for blockNumber, timestamp := range fetched {
+		result[blockNumber] = timestamp
 	}
 
 	return result, nil
+}
+
+func (s *Service) getCachedBlockTimestamp(blockNumber uint64) (int64, bool) {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
+
+	timestamp, ok := s.blockTimestampCache[blockNumber]
+	return timestamp, ok
+}
+
+func (s *Service) storeBlockTimestamps(values map[uint64]int64) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	for blockNumber, timestamp := range values {
+		s.blockTimestampCache[blockNumber] = timestamp
+	}
+
+	if len(s.blockTimestampCache) <= blockTimestampCacheMaxEntries {
+		return
+	}
+
+	keys := make([]uint64, 0, len(s.blockTimestampCache))
+	for blockNumber := range s.blockTimestampCache {
+		keys = append(keys, blockNumber)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+
+	toRemove := len(s.blockTimestampCache) - blockTimestampCacheMaxEntries
+	for i := 0; i < toRemove; i++ {
+		delete(s.blockTimestampCache, keys[i])
+	}
 }
 
 func popOperationMeta(
