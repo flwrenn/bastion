@@ -121,6 +121,9 @@ func (s *Service) indexOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load cursor: %w", err)
 	}
+	if err := s.validateInitialBackfillConfig(hasCursor); err != nil {
+		return err
+	}
 	trimmedCursor := false
 	if hasCursor && cursor > safeHead {
 		delta := cursor - safeHead
@@ -168,14 +171,44 @@ func (s *Service) indexOnce(ctx context.Context) error {
 		return nil
 	}
 
+	initialBackfill := !hasCursor
+	if initialBackfill {
+		slog.Info("starting historical backfill", "from", from, "to", to)
+	}
+
+	totalBlocks := to - from + 1
+	processedBlocks := uint64(0)
+	batchIndex := uint64(0)
+
 	for batchFrom := from; batchFrom <= to; {
 		batchTo := batchFrom + s.cfg.BatchSize - 1
 		if batchTo > to || batchTo < batchFrom {
 			batchTo = to
 		}
+		batchIndex++
 
 		if err := s.indexRange(ctx, batchFrom, batchTo); err != nil {
 			return err
+		}
+
+		if initialBackfill {
+			processedBlocks += batchTo - batchFrom + 1
+			remainingBlocks := totalBlocks - processedBlocks
+			slog.Info(
+				"indexing progress",
+				"batch",
+				batchIndex,
+				"batch_from",
+				batchFrom,
+				"batch_to",
+				batchTo,
+				"processed_blocks",
+				processedBlocks,
+				"total_blocks",
+				totalBlocks,
+				"remaining_blocks",
+				remainingBlocks,
+			)
 		}
 
 		if batchTo == to {
@@ -231,7 +264,7 @@ func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) 
 	} else if s.cfg.HasStartBlock {
 		from = s.cfg.StartBlock
 	} else {
-		from = safeHead
+		return 0, 0, false
 	}
 
 	if from > safeHead {
@@ -239,6 +272,17 @@ func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) 
 	}
 
 	return from, safeHead, true
+}
+
+func (s *Service) validateInitialBackfillConfig(hasCursor bool) error {
+	if hasCursor {
+		return nil
+	}
+	if s.cfg.HasStartBlock {
+		return nil
+	}
+
+	return fmt.Errorf("INDEXER_START_BLOCK is required on first run when no cursor exists")
 }
 
 func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint64) error {

@@ -81,11 +81,11 @@ Required env vars:
 
 - `DATABASE_URL` — PostgreSQL DSN
 - `RPC_URL` — chain JSON-RPC endpoint
+- `INDEXER_START_BLOCK` — required on first run (no cursor) to define historical backfill start block
 
 Optional indexer env vars:
 
 - `ENTRYPOINT` — override EntryPoint address (default: canonical v0.7)
-- `INDEXER_START_BLOCK` — initial block when no cursor exists
 - `INDEXER_BATCH_SIZE` — max block span per `eth_getLogs` batch (default `500`)
 - `INDEXER_CONFIRMATIONS` — confirmation lag before indexing (default `3`)
 - `INDEXER_REORG_WINDOW` — rewind window from cursor each loop (default = confirmations)

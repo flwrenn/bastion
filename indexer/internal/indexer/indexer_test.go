@@ -6,12 +6,9 @@ func TestPlanScanRange_NoCursor_NoStartBlock(t *testing.T) {
 	t.Parallel()
 
 	svc := Service{cfg: Config{}}
-	from, to, ok := svc.planScanRange(0, false, 100)
-	if !ok {
-		t.Fatal("expected scan range to be available")
-	}
-	if from != 100 || to != 100 {
-		t.Fatalf("expected range [100,100], got [%d,%d]", from, to)
+	_, _, ok := svc.planScanRange(0, false, 100)
+	if ok {
+		t.Fatal("expected no scan range when start block is not configured")
 	}
 }
 
@@ -82,5 +79,35 @@ func TestRewindRangeToSafeHead(t *testing.T) {
 	from, to = rewindRangeToSafeHead(5, 20)
 	if from != 0 || to != 5 {
 		t.Fatalf("expected [0,5], got [%d,%d]", from, to)
+	}
+}
+
+func TestValidateInitialBackfillConfig_RequiresStartBlockWithoutCursor(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{HasStartBlock: false}}
+	err := svc.validateInitialBackfillConfig(false)
+	if err == nil {
+		t.Fatal("expected validation error when cursor and start block are missing")
+	}
+}
+
+func TestValidateInitialBackfillConfig_AllowsMissingStartBlockWithCursor(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{HasStartBlock: false}}
+	err := svc.validateInitialBackfillConfig(true)
+	if err != nil {
+		t.Fatalf("expected no error when cursor exists, got %v", err)
+	}
+}
+
+func TestValidateInitialBackfillConfig_AllowsStartBlockWithoutCursor(t *testing.T) {
+	t.Parallel()
+
+	svc := Service{cfg: Config{HasStartBlock: true, StartBlock: 123}}
+	err := svc.validateInitialBackfillConfig(false)
+	if err != nil {
+		t.Fatalf("expected no error when start block is configured, got %v", err)
 	}
 }
