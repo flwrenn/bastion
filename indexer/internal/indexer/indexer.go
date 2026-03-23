@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -24,6 +25,8 @@ type Service struct {
 }
 
 const blockTimestampCacheMaxEntries = 4096
+
+var errInitialBackfillStartBlockRequired = errors.New("initial backfill start block is required")
 
 func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	if cfg.RPCURL == "" {
@@ -101,10 +104,17 @@ func (s *Service) Run(ctx context.Context) error {
 				if ctx.Err() != nil {
 					return nil
 				}
+				if isFatalIndexIterationError(err) {
+					return fmt.Errorf("index iteration failed: %w", err)
+				}
 				slog.Error("index iteration failed", "err", err)
 			}
 		}
 	}
+}
+
+func isFatalIndexIterationError(err error) bool {
+	return errors.Is(err, errInitialBackfillStartBlockRequired)
 }
 
 func (s *Service) indexOnce(ctx context.Context) error {
@@ -282,7 +292,10 @@ func (s *Service) validateInitialBackfillConfig(hasCursor bool) error {
 		return nil
 	}
 
-	return fmt.Errorf("INDEXER_START_BLOCK is required on first run when no cursor exists")
+	return fmt.Errorf(
+		"%w: INDEXER_START_BLOCK is required on first run when no cursor exists",
+		errInitialBackfillStartBlockRequired,
+	)
 }
 
 func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint64) error {
