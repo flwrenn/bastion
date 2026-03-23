@@ -118,6 +118,14 @@ func isFatalIndexIterationError(err error) bool {
 }
 
 func (s *Service) indexOnce(ctx context.Context) error {
+	cursor, hasCursor, err := db.GetStateUint64(ctx, s.pool, s.cfg.StateKey)
+	if err != nil {
+		return fmt.Errorf("load cursor: %w", err)
+	}
+	if err := s.validateInitialBackfillConfig(hasCursor); err != nil {
+		return err
+	}
+
 	safeHead, hasSafeHead, err := s.safeHead(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch safe head: %w", err)
@@ -127,13 +135,6 @@ func (s *Service) indexOnce(ctx context.Context) error {
 		return nil
 	}
 
-	cursor, hasCursor, err := db.GetStateUint64(ctx, s.pool, s.cfg.StateKey)
-	if err != nil {
-		return fmt.Errorf("load cursor: %w", err)
-	}
-	if err := s.validateInitialBackfillConfig(hasCursor); err != nil {
-		return err
-	}
 	trimmedCursor := false
 	if hasCursor && cursor > safeHead {
 		delta := cursor - safeHead
