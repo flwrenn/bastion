@@ -1,6 +1,10 @@
 package indexer
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
 
 func TestPlanScanRange_NoCursor_NoStartBlock(t *testing.T) {
 	t.Parallel()
@@ -90,6 +94,9 @@ func TestValidateInitialBackfillConfig_RequiresStartBlockWithoutCursor(t *testin
 	if err == nil {
 		t.Fatal("expected validation error when cursor and start block are missing")
 	}
+	if !errors.Is(err, errInitialBackfillStartBlockRequired) {
+		t.Fatalf("expected sentinel error, got %v", err)
+	}
 }
 
 func TestValidateInitialBackfillConfig_AllowsMissingStartBlockWithCursor(t *testing.T) {
@@ -109,5 +116,22 @@ func TestValidateInitialBackfillConfig_AllowsStartBlockWithoutCursor(t *testing.
 	err := svc.validateInitialBackfillConfig(false)
 	if err != nil {
 		t.Fatalf("expected no error when start block is configured, got %v", err)
+	}
+}
+
+func TestIsFatalIndexIterationError(t *testing.T) {
+	t.Parallel()
+
+	if !isFatalIndexIterationError(errInitialBackfillStartBlockRequired) {
+		t.Fatal("expected sentinel to be fatal")
+	}
+
+	wrapped := fmt.Errorf("wrapped: %w", errInitialBackfillStartBlockRequired)
+	if !isFatalIndexIterationError(wrapped) {
+		t.Fatal("expected wrapped sentinel to be fatal")
+	}
+
+	if isFatalIndexIterationError(errors.New("other error")) {
+		t.Fatal("expected non-sentinel error to be non-fatal")
 	}
 }
