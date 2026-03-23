@@ -204,21 +204,29 @@ func (s *Service) indexOnce(ctx context.Context) error {
 		if initialBackfill {
 			processedBlocks += batchTo - batchFrom + 1
 			remainingBlocks := totalBlocks - processedBlocks
-			slog.Info(
-				"indexing progress",
-				"batch",
-				batchIndex,
-				"batch_from",
-				batchFrom,
-				"batch_to",
-				batchTo,
-				"processed_blocks",
-				processedBlocks,
-				"total_blocks",
-				totalBlocks,
-				"remaining_blocks",
-				remainingBlocks,
-			)
+			if remainingBlocks == 0 {
+				slog.Info(
+					"historical backfill complete",
+					"batches",
+					batchIndex,
+					"processed_blocks",
+					processedBlocks,
+					"total_blocks",
+					totalBlocks,
+				)
+			} else {
+				slog.Debug(
+					"historical backfill progress",
+					"batch",
+					batchIndex,
+					"processed_blocks",
+					processedBlocks,
+					"total_blocks",
+					totalBlocks,
+					"remaining_blocks",
+					remainingBlocks,
+				)
+			}
 		}
 
 		if batchTo == to {
