@@ -3,6 +3,7 @@ package indexer
 import (
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ const (
 
 type Config struct {
 	RPCURL              string
+	WSURL               string
 	EntryPoint          string
 	StartBlock          uint64
 	HasStartBlock       bool
@@ -54,6 +56,14 @@ func LoadConfigFromEnv() (Config, error) {
 
 	if cfg.RPCURL == "" {
 		return Config{}, fmt.Errorf("RPC_URL is not set")
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WS_RPC_URL")); value != "" {
+		normalizedWSURL, err := normalizeWebSocketURL(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse WS_RPC_URL: %w", err)
+		}
+		cfg.WSURL = normalizedWSURL
 	}
 
 	if value := strings.TrimSpace(os.Getenv("ENTRYPOINT")); value != "" {
@@ -166,4 +176,19 @@ func LoadConfigFromEnv() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func normalizeWebSocketURL(value string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme != "ws" && parsed.Scheme != "wss" {
+		return "", fmt.Errorf("scheme must be ws or wss")
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("host is required")
+	}
+
+	return parsed.String(), nil
 }

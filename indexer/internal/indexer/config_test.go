@@ -91,6 +91,7 @@ func TestLoadConfigFromEnv_Defaults(t *testing.T) {
 
 func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	t.Setenv("RPC_URL", "https://rpc.example")
+	t.Setenv("WS_RPC_URL", "wss://ws.example")
 	t.Setenv("ENTRYPOINT", "0X0000000071727De22E5E9d8BAf0edAc6f37da032")
 	t.Setenv("INDEXER_START_BLOCK", "123")
 	t.Setenv("INDEXER_BATCH_SIZE", "777")
@@ -110,6 +111,9 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 
 	if !cfg.HasStartBlock || cfg.StartBlock != 123 {
 		t.Fatalf("expected start block 123, got has=%v block=%d", cfg.HasStartBlock, cfg.StartBlock)
+	}
+	if cfg.WSURL != "wss://ws.example" {
+		t.Fatalf("expected ws url %q, got %q", "wss://ws.example", cfg.WSURL)
 	}
 	if cfg.BatchSize != 777 {
 		t.Fatalf("expected batch size 777, got %d", cfg.BatchSize)
@@ -137,6 +141,19 @@ func TestLoadConfigFromEnv_ParsesOptionals(t *testing.T) {
 	}
 	if !cfg.AllowCursorTrim {
 		t.Fatal("expected cursor trim to be enabled")
+	}
+}
+
+func TestLoadConfigFromEnv_InvalidWebSocketURL(t *testing.T) {
+	t.Setenv("RPC_URL", "https://rpc.example")
+	t.Setenv("WS_RPC_URL", "https://ws.example")
+
+	_, err := LoadConfigFromEnv()
+	if err == nil {
+		t.Fatal("expected websocket url validation error")
+	}
+	if !strings.Contains(err.Error(), "WS_RPC_URL") {
+		t.Fatalf("expected WS_RPC_URL parse error, got %v", err)
 	}
 }
 
@@ -219,6 +236,7 @@ func TestLoadConfigFromEnv_InvalidDurationsAndBools(t *testing.T) {
 func clearOptionalIndexerEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ENTRYPOINT", "")
+	t.Setenv("WS_RPC_URL", "")
 	t.Setenv("INDEXER_START_BLOCK", "")
 	t.Setenv("INDEXER_BATCH_SIZE", "")
 	t.Setenv("INDEXER_CONFIRMATIONS", "")
