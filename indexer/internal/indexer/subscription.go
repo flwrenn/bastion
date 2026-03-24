@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,7 +206,17 @@ type rpcSubscriptionHead struct {
 }
 
 func originForWebSocketURL(wsURL string) string {
-	if len(wsURL) >= 6 && wsURL[:6] == "wss://" {
+	parsed, err := url.Parse(wsURL)
+	if err == nil && parsed.Host != "" {
+		scheme := "http"
+		if strings.EqualFold(parsed.Scheme, "wss") {
+			scheme = "https"
+		}
+
+		return scheme + "://" + parsed.Host
+	}
+
+	if strings.HasPrefix(strings.ToLower(wsURL), "wss://") {
 		return "https://bastion.local"
 	}
 
