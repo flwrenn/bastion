@@ -158,11 +158,24 @@ func TestRedactWebSocketURLError(t *testing.T) {
 	wsURL := "wss://rpc.example/ws?key=secret"
 	err := fmt.Errorf("dial failed for %s", wsURL)
 	redacted := redactWebSocketURLError(err, wsURL)
+	if redacted == nil {
+		t.Fatal("expected redacted error")
+	}
 
-	if redacted == err.Error() {
+	if redacted.Error() == err.Error() {
 		t.Fatal("expected websocket url to be redacted")
 	}
-	if redacted != "dial failed for wss://rpc.example" {
-		t.Fatalf("unexpected redacted error: %q", redacted)
+	if redacted.Error() != "dial failed for wss://rpc.example" {
+		t.Fatalf("unexpected redacted error: %q", redacted.Error())
+	}
+}
+
+func TestRedactWebSocketURLError_ReturnsOriginalWhenNoURL(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New("dial failed")
+	redacted := redactWebSocketURLError(err, "")
+	if !errors.Is(redacted, err) {
+		t.Fatal("expected original error when ws url is empty")
 	}
 }

@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -218,5 +219,75 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestRunCancelsSubscriptionLoopOnFatalIterationError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan struct{}, 1)
+	stopped := make(chan struct{}, 1)
+	var calls atomic.Int32
+
+	svc := &Service{
+		cfg: Config{
+			PollInterval:   5 * time.Millisecond,
+			WSURL:          "wss://ws.example",
+			HasStartBlock:  true,
+			StateKey:       stateKeyLastIndexedBlock,
+			RequestTimeout: time.Second,
+			BatchSize:      1,
+		},
+		pool: &pgxpool.Pool{},
+		rpc:  &rpcClient{},
+		newHeadSubscriptionFactory: func(context.Context, string) (headSubscription, error) {
+			calls.Add(1)
+			started <- struct{}{}
+			return &stubHeadSubscription{
+				nextFn: func(ctx context.Context) error {
+					<-ctx.Done()
+					stopped <- struct{}{}
+					return ctx.Err()
+				},
+			}, nil
+		},
+		subscriptionReconnectBackoff: time.Millisecond,
+	}
+
+	indexCalls := 0
+	svc.indexOnceFunc = func(context.Context) error {
+		indexCalls++
+		if indexCalls == 1 {
+			return nil
+		}
+
+		return errInitialBackfillStartBlockRequired
+	}
+
+	err := svc.Run(ctx)
+	if err == nil {
+		t.Fatal("expected fatal iteration error")
+	}
+	if !strings.Contains(err.Error(), "index iteration failed") {
+		t.Fatalf("expected iteration failure error, got %v", err)
+	}
+
+	select {
+	case <-started:
+	default:
+		t.Fatal("expected subscription loop to start")
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected subscription loop to be cancelled when Run returns")
+	}
+
+	if calls.Load() == 0 {
+		t.Fatal("expected subscription factory to be called")
 	}
 }
