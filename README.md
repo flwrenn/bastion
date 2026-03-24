@@ -85,6 +85,7 @@ Required env vars:
 
 Optional indexer env vars:
 
+- `WS_RPC_URL` — WebSocket RPC endpoint for `eth_subscribe` new-head triggers (falls back to poll-only when unset)
 - `ENTRYPOINT` — override EntryPoint address (default: canonical v0.7)
 - `INDEXER_BATCH_SIZE` — max block span per `eth_getLogs` batch (default `500`)
 - `INDEXER_CONFIRMATIONS` — confirmation lag before indexing (default `3`)

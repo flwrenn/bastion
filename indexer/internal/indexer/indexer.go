@@ -16,12 +16,14 @@ import (
 )
 
 type Service struct {
-	cfg                 Config
-	pool                *pgxpool.Pool
-	rpc                 *rpcClient
-	entryPoint          string
-	blockTimestampCache map[uint64]int64
-	cacheMu             sync.RWMutex
+	cfg                          Config
+	pool                         *pgxpool.Pool
+	rpc                          *rpcClient
+	entryPoint                   string
+	blockTimestampCache          map[uint64]int64
+	cacheMu                      sync.RWMutex
+	newHeadSubscriptionFactory   func(context.Context, string) (headSubscription, error)
+	subscriptionReconnectBackoff time.Duration
 }
 
 const blockTimestampCacheMaxEntries = 4096
@@ -63,11 +65,13 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	}
 
 	return &Service{
-		cfg:                 cfg,
-		pool:                pool,
-		rpc:                 newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes),
-		entryPoint:          normalizedEntryPoint,
-		blockTimestampCache: make(map[uint64]int64),
+		cfg:                          cfg,
+		pool:                         pool,
+		rpc:                          newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes),
+		entryPoint:                   normalizedEntryPoint,
+		blockTimestampCache:          make(map[uint64]int64),
+		newHeadSubscriptionFactory:   newWebSocketHeadSubscription,
+		subscriptionReconnectBackoff: defaultSubscriptionBackoff,
 	}, nil
 }
 
@@ -94,22 +98,125 @@ func (s *Service) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
+	wakeCh := make(chan struct{}, 1)
+
+	if s.cfg.WSURL != "" {
+		slog.Info("starting head subscription", "ws_url", s.cfg.WSURL)
+		go s.runHeadSubscriptionLoop(ctx, wakeCh)
+	}
+
+	runIteration := func() error {
+		err := s.indexOnce(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if isFatalIndexIterationError(err) {
+			return fmt.Errorf("index iteration failed: %w", err)
+		}
+		slog.Error("index iteration failed", "err", err)
+		return nil
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := s.indexOnce(ctx); err != nil {
-				if ctx.Err() != nil {
-					return nil
-				}
-				if isFatalIndexIterationError(err) {
-					return fmt.Errorf("index iteration failed: %w", err)
-				}
-				slog.Error("index iteration failed", "err", err)
+			if err := runIteration(); err != nil {
+				return err
+			}
+		case <-wakeCh:
+			if err := runIteration(); err != nil {
+				return err
 			}
 		}
+	}
+}
+
+func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- struct{}) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		subscription, err := s.newHeadSubscription(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if s.cfg.WSURL == "" {
+				return
+			}
+			slog.Warn("head subscription connect failed; retrying", "err", err)
+			if !sleepContext(ctx, s.subscriptionBackoff()) {
+				return
+			}
+			continue
+		}
+
+		slog.Info("head subscription connected")
+
+		err = s.consumeHeadSubscription(ctx, subscription, wakeCh)
+		closeErr := subscription.Close()
+		if closeErr != nil && ctx.Err() == nil {
+			slog.Warn("head subscription close failed", "err", closeErr)
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		if err != nil {
+			slog.Warn("head subscription disconnected; reconnecting", "err", err)
+		}
+		if !sleepContext(ctx, s.subscriptionBackoff()) {
+			return
+		}
+	}
+}
+
+func (s *Service) subscriptionBackoff() time.Duration {
+	if s.subscriptionReconnectBackoff <= 0 {
+		return defaultSubscriptionBackoff
+	}
+
+	return s.subscriptionReconnectBackoff
+}
+
+func (s *Service) newHeadSubscription(ctx context.Context) (headSubscription, error) {
+	factory := s.newHeadSubscriptionFactory
+	if factory == nil {
+		factory = newWebSocketHeadSubscription
+	}
+
+	return factory(ctx, s.cfg.WSURL)
+}
+
+func (s *Service) consumeHeadSubscription(ctx context.Context, subscription headSubscription, wakeCh chan<- struct{}) error {
+	for {
+		if err := subscription.Next(ctx); err != nil {
+			return err
+		}
+
+		select {
+		case wakeCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

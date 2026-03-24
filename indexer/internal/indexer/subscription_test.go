@@ -1,0 +1,137 @@
+package indexer
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+type stubHeadSubscription struct {
+	nextFn  func(context.Context) error
+	closed  bool
+	closeFn func() error
+}
+
+func (s *stubHeadSubscription) Next(ctx context.Context) error {
+	if s.nextFn == nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	return s.nextFn(ctx)
+}
+
+func (s *stubHeadSubscription) Close() error {
+	s.closed = true
+	if s.closeFn != nil {
+		return s.closeFn()
+	}
+
+	return nil
+}
+
+func TestConsumeHeadSubscriptionSignalsWakeWithoutBlocking(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	nextCalls := 0
+	subscription := &stubHeadSubscription{
+		nextFn: func(context.Context) error {
+			nextCalls++
+			if nextCalls >= 3 {
+				return errors.New("done")
+			}
+			return nil
+		},
+	}
+
+	service := &Service{}
+	wakeCh := make(chan struct{}, 1)
+	err := service.consumeHeadSubscription(ctx, subscription, wakeCh)
+	if err == nil {
+		t.Fatal("expected consumeHeadSubscription error")
+	}
+
+	if len(wakeCh) != 1 {
+		t.Fatalf("expected wake signal to be buffered once, got %d", len(wakeCh))
+	}
+}
+
+func TestRunHeadSubscriptionLoopReconnectsAndSignalsWake(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wakeCh := make(chan struct{}, 4)
+	connectAttempts := 0
+	firstSubscription := &stubHeadSubscription{
+		nextFn: func(context.Context) error {
+			return errors.New("connection lost")
+		},
+	}
+	secondSubscription := &stubHeadSubscription{}
+	secondSubscription.nextFn = func(context.Context) error {
+		select {
+		case wakeCh <- struct{}{}:
+		default:
+		}
+		cancel()
+		return context.Canceled
+	}
+
+	service := &Service{
+		cfg: Config{WSURL: "wss://ws.example"},
+		newHeadSubscriptionFactory: func(context.Context, string) (headSubscription, error) {
+			connectAttempts++
+			if connectAttempts == 1 {
+				return firstSubscription, nil
+			}
+			return secondSubscription, nil
+		},
+		subscriptionReconnectBackoff: time.Millisecond,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		service.runHeadSubscriptionLoop(ctx, wakeCh)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscription loop did not stop")
+	}
+
+	if connectAttempts < 2 {
+		t.Fatalf("expected at least 2 connection attempts, got %d", connectAttempts)
+	}
+	if !firstSubscription.closed {
+		t.Fatal("expected first subscription to be closed")
+	}
+	if !secondSubscription.closed {
+		t.Fatal("expected second subscription to be closed")
+	}
+}
+
+func TestRunHeadSubscriptionLoopSkipsWhenContextCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	service := &Service{
+		cfg: Config{WSURL: "wss://ws.example"},
+		newHeadSubscriptionFactory: func(context.Context, string) (headSubscription, error) {
+			t.Fatal("factory should not be called after context cancellation")
+			return nil, nil
+		},
+	}
+
+	wakeCh := make(chan struct{}, 1)
+	service.runHeadSubscriptionLoop(ctx, wakeCh)
+}
