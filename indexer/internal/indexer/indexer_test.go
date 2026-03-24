@@ -135,3 +135,34 @@ func TestIsFatalIndexIterationError(t *testing.T) {
 		t.Fatal("expected non-sentinel error to be non-fatal")
 	}
 }
+
+func TestWebsocketLogEndpoint(t *testing.T) {
+	t.Parallel()
+
+	if got := websocketLogEndpoint("wss://rpc.example/ws?key=secret"); got != "wss://rpc.example" {
+		t.Fatalf("expected redacted endpoint, got %q", got)
+	}
+
+	if got := websocketLogEndpoint("ws://localhost:8546/path"); got != "ws://localhost:8546" {
+		t.Fatalf("expected endpoint with host+port, got %q", got)
+	}
+
+	if got := websocketLogEndpoint("bad://"); got != "invalid" {
+		t.Fatalf("expected invalid endpoint marker, got %q", got)
+	}
+}
+
+func TestRedactWebSocketURLError(t *testing.T) {
+	t.Parallel()
+
+	wsURL := "wss://rpc.example/ws?key=secret"
+	err := fmt.Errorf("dial failed for %s", wsURL)
+	redacted := redactWebSocketURLError(err, wsURL)
+
+	if redacted == err.Error() {
+		t.Fatal("expected websocket url to be redacted")
+	}
+	if redacted != "dial failed for wss://rpc.example" {
+		t.Fatalf("unexpected redacted error: %q", redacted)
+	}
+}

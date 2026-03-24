@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -101,7 +102,7 @@ func (s *Service) Run(ctx context.Context) error {
 	wakeCh := make(chan struct{}, 1)
 
 	if s.cfg.WSURL != "" {
-		slog.Info("starting head subscription", "ws_url", s.cfg.WSURL)
+		slog.Info("starting head subscription", "ws_endpoint", websocketLogEndpoint(s.cfg.WSURL))
 		go s.runHeadSubscriptionLoop(ctx, wakeCh)
 	}
 
@@ -150,7 +151,7 @@ func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- str
 			if s.cfg.WSURL == "" {
 				return
 			}
-			slog.Warn("head subscription connect failed; retrying", "err", err)
+			slog.Warn("head subscription connect failed; retrying", "err", redactWebSocketURLError(err, s.cfg.WSURL))
 			if !sleepContext(ctx, s.subscriptionBackoff()) {
 				return
 			}
@@ -170,12 +171,40 @@ func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- str
 		}
 
 		if err != nil {
-			slog.Warn("head subscription disconnected; reconnecting", "err", err)
+			slog.Warn("head subscription disconnected; reconnecting", "err", redactWebSocketURLError(err, s.cfg.WSURL))
 		}
 		if !sleepContext(ctx, s.subscriptionBackoff()) {
 			return
 		}
 	}
+}
+
+func websocketLogEndpoint(wsURL string) string {
+	parsed, err := url.Parse(wsURL)
+	if err != nil || parsed.Host == "" {
+		return "invalid"
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme == "" {
+		return parsed.Host
+	}
+
+	return scheme + "://" + parsed.Host
+}
+
+func redactWebSocketURLError(err error, wsURL string) string {
+	if err == nil {
+		return ""
+	}
+
+	errText := err.Error()
+	if wsURL == "" {
+		return errText
+	}
+
+	endpoint := websocketLogEndpoint(wsURL)
+	return strings.ReplaceAll(errText, wsURL, endpoint)
 }
 
 func (s *Service) subscriptionBackoff() time.Duration {
