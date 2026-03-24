@@ -155,7 +155,9 @@ func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- str
 			return
 		}
 
-		subscription, err := s.newHeadSubscription(ctx)
+		connectCtx, cancelConnect := context.WithTimeout(ctx, s.subscriptionConnectTimeout())
+		subscription, err := s.newHeadSubscription(connectCtx)
+		cancelConnect()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -189,6 +191,14 @@ func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- str
 			return
 		}
 	}
+}
+
+func (s *Service) subscriptionConnectTimeout() time.Duration {
+	if s.cfg.RequestTimeout <= 0 {
+		return defaultRequestTimeout
+	}
+
+	return s.cfg.RequestTimeout
 }
 
 func websocketLogEndpoint(wsURL string) string {
