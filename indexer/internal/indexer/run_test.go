@@ -264,6 +264,12 @@ func TestRunCancelsSubscriptionLoopOnFatalIterationError(t *testing.T) {
 			return nil
 		}
 
+		select {
+		case <-started:
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("expected subscription loop to start before fatal iteration")
+		}
+
 		return errInitialBackfillStartBlockRequired
 	}
 
@@ -273,12 +279,6 @@ func TestRunCancelsSubscriptionLoopOnFatalIterationError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "index iteration failed") {
 		t.Fatalf("expected iteration failure error, got %v", err)
-	}
-
-	select {
-	case <-started:
-	default:
-		t.Fatal("expected subscription loop to start")
 	}
 
 	select {
