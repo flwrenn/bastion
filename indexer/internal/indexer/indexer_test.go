@@ -161,6 +161,9 @@ func TestRedactWebSocketURLError(t *testing.T) {
 	if redacted == nil {
 		t.Fatal("expected redacted error")
 	}
+	if !errors.Is(redacted, err) {
+		t.Fatal("expected redacted error to preserve original cause")
+	}
 
 	if redacted.Error() == err.Error() {
 		t.Fatal("expected websocket url to be redacted")

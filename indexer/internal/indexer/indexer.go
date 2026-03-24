@@ -231,7 +231,20 @@ func redactWebSocketURLError(err error, wsURL string) error {
 		return err
 	}
 
-	return errors.New(redacted)
+	return &redactedWebSocketError{message: redacted, cause: err}
+}
+
+type redactedWebSocketError struct {
+	message string
+	cause   error
+}
+
+func (e *redactedWebSocketError) Error() string {
+	return e.message
+}
+
+func (e *redactedWebSocketError) Unwrap() error {
+	return e.cause
 }
 
 func (s *Service) subscriptionBackoff() time.Duration {

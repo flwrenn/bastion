@@ -16,6 +16,7 @@ import (
 const (
 	subscriptionTypeNewHeads   = "newHeads"
 	defaultSubscriptionBackoff = 2 * time.Second
+	subscriptionIODeadline     = 500 * time.Millisecond
 )
 
 type headSubscription interface {
@@ -148,7 +149,7 @@ func (s *websocketHeadSubscription) read(ctx context.Context) ([]byte, error) {
 			return nil, err
 		}
 
-		readDeadline := time.Now().Add(500 * time.Millisecond)
+		readDeadline := time.Now().Add(subscriptionIODeadline)
 		if err := s.ws.SetReadDeadline(readDeadline); err != nil {
 			return nil, fmt.Errorf("set read deadline: %w", err)
 		}
@@ -176,7 +177,7 @@ func writeWebSocketMessage(ctx context.Context, ws *websocket.Conn, payload []by
 			return err
 		}
 
-		writeDeadline := time.Now().Add(500 * time.Millisecond)
+		writeDeadline := time.Now().Add(subscriptionIODeadline)
 		if err := ws.SetWriteDeadline(writeDeadline); err != nil {
 			return fmt.Errorf("set write deadline: %w", err)
 		}
