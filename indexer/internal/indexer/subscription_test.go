@@ -66,22 +66,22 @@ func TestRunHeadSubscriptionLoopReconnectsAndSignalsWake(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	wakeCh := make(chan struct{}, 4)
+	wakeCh := make(chan struct{}, 1)
 	connectAttempts := 0
 	firstSubscription := &stubHeadSubscription{
 		nextFn: func(context.Context) error {
 			return errors.New("connection lost")
 		},
 	}
-	secondSubscription := &stubHeadSubscription{}
-	secondSubscription.nextFn = func(context.Context) error {
-		select {
-		case wakeCh <- struct{}{}:
-		default:
+	secondNextCalls := 0
+	secondSubscription := &stubHeadSubscription{nextFn: func(context.Context) error {
+		secondNextCalls++
+		if secondNextCalls == 1 {
+			return nil
 		}
 		cancel()
 		return context.Canceled
-	}
+	}}
 
 	service := &Service{
 		cfg: Config{WSURL: "wss://ws.example"},
@@ -115,6 +115,18 @@ func TestRunHeadSubscriptionLoopReconnectsAndSignalsWake(t *testing.T) {
 	}
 	if !secondSubscription.closed {
 		t.Fatal("expected second subscription to be closed")
+	}
+
+	select {
+	case <-wakeCh:
+	default:
+		t.Fatal("expected wake signal from subscription consumer")
+	}
+
+	select {
+	case <-wakeCh:
+		t.Fatal("expected exactly one wake signal")
+	default:
 	}
 }
 
