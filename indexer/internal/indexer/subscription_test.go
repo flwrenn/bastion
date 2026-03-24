@@ -118,6 +118,47 @@ func TestRunHeadSubscriptionLoopReconnectsAndSignalsWake(t *testing.T) {
 	}
 }
 
+func TestRunHeadSubscriptionLoopTimesOutStuckConnect(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	wakeCh := make(chan struct{}, 1)
+	connectAttempts := 0
+	service := &Service{
+		cfg: Config{
+			WSURL:          "wss://ws.example",
+			RequestTimeout: 10 * time.Millisecond,
+		},
+		newHeadSubscriptionFactory: func(ctx context.Context, _ string) (headSubscription, error) {
+			connectAttempts++
+			<-ctx.Done()
+			if connectAttempts >= 2 {
+				cancel()
+			}
+			return nil, ctx.Err()
+		},
+		subscriptionReconnectBackoff: time.Millisecond,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		service.runHeadSubscriptionLoop(ctx, wakeCh)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("expected subscription loop to stop after timeout and cancellation")
+	}
+
+	if connectAttempts < 2 {
+		t.Fatalf("expected reconnect attempts after timeout, got %d", connectAttempts)
+	}
+}
+
 func TestRunHeadSubscriptionLoopSkipsWhenContextCanceled(t *testing.T) {
 	t.Parallel()
 
@@ -134,6 +175,24 @@ func TestRunHeadSubscriptionLoopSkipsWhenContextCanceled(t *testing.T) {
 
 	wakeCh := make(chan struct{}, 1)
 	service.runHeadSubscriptionLoop(ctx, wakeCh)
+}
+
+func TestSubscriptionConnectTimeoutDefaultsWhenRequestTimeoutInvalid(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{cfg: Config{RequestTimeout: 0}}
+	if got := service.subscriptionConnectTimeout(); got != defaultRequestTimeout {
+		t.Fatalf("expected default request timeout %s, got %s", defaultRequestTimeout, got)
+	}
+}
+
+func TestSubscriptionConnectTimeoutUsesRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	service := &Service{cfg: Config{RequestTimeout: 7 * time.Second}}
+	if got := service.subscriptionConnectTimeout(); got != 7*time.Second {
+		t.Fatalf("expected request timeout %s, got %s", 7*time.Second, got)
+	}
 }
 
 func TestOriginForWebSocketURL_DerivesHostBasedOrigin(t *testing.T) {
