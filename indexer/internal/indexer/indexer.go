@@ -25,6 +25,7 @@ type Service struct {
 	cacheMu                      sync.RWMutex
 	newHeadSubscriptionFactory   func(context.Context, string) (headSubscription, error)
 	subscriptionReconnectBackoff time.Duration
+	indexOnceFunc                func(context.Context) error
 }
 
 const blockTimestampCacheMaxEntries = 4096
@@ -90,12 +91,15 @@ func (s *Service) Run(ctx context.Context) error {
 		return fmt.Errorf("rpc client is required")
 	}
 
-	if err := s.indexOnce(ctx); err != nil {
+	if err := s.runIndexOnce(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
 		return fmt.Errorf("initial index iteration failed: %w", err)
 	}
+
+	runCtx, stopRun := context.WithCancel(ctx)
+	defer stopRun()
 
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
@@ -103,15 +107,15 @@ func (s *Service) Run(ctx context.Context) error {
 
 	if s.cfg.WSURL != "" {
 		slog.Info("starting head subscription", "ws_endpoint", websocketLogEndpoint(s.cfg.WSURL))
-		go s.runHeadSubscriptionLoop(ctx, wakeCh)
+		go s.runHeadSubscriptionLoop(runCtx, wakeCh)
 	}
 
 	runIteration := func() error {
-		err := s.indexOnce(ctx)
+		err := s.runIndexOnce(runCtx)
 		if err == nil {
 			return nil
 		}
-		if ctx.Err() != nil {
+		if runCtx.Err() != nil {
 			return nil
 		}
 		if isFatalIndexIterationError(err) {
@@ -123,7 +127,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-runCtx.Done():
 			return nil
 		case <-ticker.C:
 			if err := runIteration(); err != nil {
@@ -135,6 +139,14 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (s *Service) runIndexOnce(ctx context.Context) error {
+	if s.indexOnceFunc != nil {
+		return s.indexOnceFunc(ctx)
+	}
+
+	return s.indexOnce(ctx)
 }
 
 func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- struct{}) {
@@ -193,18 +205,23 @@ func websocketLogEndpoint(wsURL string) string {
 	return scheme + "://" + parsed.Host
 }
 
-func redactWebSocketURLError(err error, wsURL string) string {
+func redactWebSocketURLError(err error, wsURL string) error {
 	if err == nil {
-		return ""
+		return nil
+	}
+	if wsURL == "" {
+		return err
 	}
 
 	errText := err.Error()
-	if wsURL == "" {
-		return errText
-	}
 
 	endpoint := websocketLogEndpoint(wsURL)
-	return strings.ReplaceAll(errText, wsURL, endpoint)
+	redacted := strings.ReplaceAll(errText, wsURL, endpoint)
+	if redacted == errText {
+		return err
+	}
+
+	return errors.New(redacted)
 }
 
 func (s *Service) subscriptionBackoff() time.Duration {
