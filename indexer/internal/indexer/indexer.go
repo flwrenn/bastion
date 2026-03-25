@@ -60,6 +60,13 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pool is required")
 	}
+	if cfg.WSURL != "" {
+		normalizedWSURL, err := normalizeWebSocketURL(cfg.WSURL)
+		if err != nil {
+			return nil, fmt.Errorf("normalize WSURL: %w", err)
+		}
+		cfg.WSURL = normalizedWSURL
+	}
 
 	normalizedEntryPoint, err := normalizeAddress(cfg.EntryPoint)
 	if err != nil {

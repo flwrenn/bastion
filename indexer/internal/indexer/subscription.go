@@ -172,26 +172,25 @@ func (s *websocketHeadSubscription) read(ctx context.Context) ([]byte, error) {
 }
 
 func writeWebSocketMessage(ctx context.Context, ws *websocket.Conn, payload []byte) error {
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		writeDeadline := time.Now().Add(subscriptionIODeadline)
-		if err := ws.SetWriteDeadline(writeDeadline); err != nil {
-			return fmt.Errorf("set write deadline: %w", err)
-		}
-
-		err := websocket.Message.Send(ws, payload)
-		if err == nil {
-			return nil
-		}
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			continue
-		}
-
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+
+	writeDeadline := time.Now().Add(subscriptionIODeadline)
+	if err := ws.SetWriteDeadline(writeDeadline); err != nil {
+		return fmt.Errorf("set write deadline: %w", err)
+	}
+
+	err := websocket.Message.Send(ws, payload)
+	if err == nil {
+		return nil
+	}
+
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return fmt.Errorf("websocket write timeout: %w", err)
+	}
+
+	return err
 }
 
 type rpcSubscriptionNotification struct {
