@@ -199,6 +199,22 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 			},
 			wantErr: "StateKey is required",
 		},
+		{
+			name: "invalid websocket url",
+			cfg: Config{
+				RPCURL:              "http://127.0.0.1:8545",
+				WSURL:               "https://ws.example",
+				EntryPoint:          defaultEntryPoint,
+				PollInterval:        time.Second,
+				BatchSize:           1,
+				RequestTimeout:      time.Second,
+				RPCConcurrency:      1,
+				RPCResponseMaxBytes: 1024,
+				EnableTxEnrichment:  true,
+				StateKey:            stateKeyLastIndexedBlock,
+			},
+			wantErr: "normalize WSURL",
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,6 +235,33 @@ func TestNewRejectsInvalidConfig(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestNewNormalizesWebSocketURL(t *testing.T) {
+	t.Parallel()
+
+	svc, err := New(
+		Config{
+			RPCURL:              "http://127.0.0.1:8545",
+			WSURL:               "  wss://ws.example/path?apiKey=secret  ",
+			EntryPoint:          defaultEntryPoint,
+			PollInterval:        time.Second,
+			BatchSize:           1,
+			RequestTimeout:      time.Second,
+			RPCConcurrency:      1,
+			RPCResponseMaxBytes: 1024,
+			EnableTxEnrichment:  true,
+			StateKey:            stateKeyLastIndexedBlock,
+		},
+		&pgxpool.Pool{},
+	)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	if svc.cfg.WSURL != "wss://ws.example/path?apiKey=secret" {
+		t.Fatalf("expected normalized WSURL, got %q", svc.cfg.WSURL)
 	}
 }
 
