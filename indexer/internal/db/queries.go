@@ -16,9 +16,7 @@ type ListParams struct {
 	Offset int
 }
 
-// ListOperations returns a page of user operations ordered newest-first,
-// along with the total count matching the filter.
-func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]UserOperation, int, error) {
+func clampListParams(p *ListParams) {
 	if p.Limit <= 0 {
 		p.Limit = 20
 	}
@@ -28,6 +26,15 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	if p.Offset < 0 {
 		p.Offset = 0
 	}
+}
+
+// ListOperations returns a page of user operations ordered newest-first,
+// along with the total count matching the filter.
+func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]UserOperation, int, error) {
+	if pool == nil {
+		return nil, 0, errors.New("pool is required")
+	}
+	clampListParams(&p)
 
 	var total int
 	var rows pgx.Rows
@@ -108,6 +115,9 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 // GetOperationByHash returns a single user operation by its userOpHash.
 // Returns nil, nil when no matching row exists.
 func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*UserOperation, error) {
+	if pool == nil {
+		return nil, errors.New("pool is required")
+	}
 	var op UserOperation
 	err := pool.QueryRow(ctx, `
 		SELECT id, user_op_hash, sender, paymaster, target, calldata,
@@ -150,6 +160,9 @@ type Stats struct {
 
 // GetStats returns aggregate statistics across all indexed operations.
 func GetStats(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
+	if pool == nil {
+		return Stats{}, errors.New("pool is required")
+	}
 	var s Stats
 	err := pool.QueryRow(ctx, `
 		SELECT count(*),
