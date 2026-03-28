@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/flwrenn/bastion/indexer/internal/api"
 	"github.com/flwrenn/bastion/indexer/internal/db"
 	"github.com/flwrenn/bastion/indexer/internal/indexer"
 )
@@ -71,6 +72,9 @@ func run() error {
 
 	mux := http.NewServeMux()
 
+	apiHandler := api.New(pool)
+	apiHandler.Register(mux)
+
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"name":"bastion-indexer","status":"ok"}`)
@@ -91,7 +95,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: mux,
+		Handler: api.CORS(mux),
 	}
 
 	// Shut down gracefully on signal, draining in-flight requests.
