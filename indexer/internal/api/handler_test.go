@@ -18,7 +18,7 @@ func TestEncodeHex(t *testing.T) {
 		want string
 	}{
 		{"nil returns empty", nil, ""},
-		{"empty returns empty", []byte{}, ""},
+		{"empty returns 0x", []byte{}, "0x"},
 		{"20-byte address", make([]byte, 20), "0x0000000000000000000000000000000000000000"},
 		{"short bytes", []byte{0xca, 0xfe}, "0xcafe"},
 	}
