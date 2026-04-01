@@ -213,7 +213,7 @@ func TestGetOperationShortHash(t *testing.T) {
 	}
 }
 
-func TestListOperationsClampedResponse(t *testing.T) {
+func TestClampedParamsFromQuery(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
