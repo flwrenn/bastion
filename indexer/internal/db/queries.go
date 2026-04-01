@@ -26,17 +26,20 @@ func clampListParams(p *ListParams) {
 	if p.Offset < 0 {
 		p.Offset = 0
 	}
+	if p.Offset > 10000 {
+		p.Offset = 10000
+	}
 }
 
 // ListOperations returns a page of user operations ordered newest-first,
 // along with the total count matching the filter.
-func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]UserOperation, int, error) {
+func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]UserOperation, int64, error) {
 	if pool == nil {
 		return nil, 0, errors.New("pool is required")
 	}
 	clampListParams(&p)
 
-	var total int
+	var total int64
 	var rows pgx.Rows
 	var err error
 

@@ -147,7 +147,7 @@ type operationResponse struct {
 
 type listResponse struct {
 	Data   []operationResponse `json:"data"`
-	Total  int                 `json:"total"`
+	Total  int64               `json:"total"`
 	Limit  int                 `json:"limit"`
 	Offset int                 `json:"offset"`
 }
