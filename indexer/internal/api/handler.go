@@ -55,8 +55,12 @@ func (h *Handler) ListOperations(w http.ResponseWriter, r *http.Request) {
 	db.ClampListParams(&params)
 
 	if s := r.URL.Query().Get("sender"); s != "" {
+		if len(s) != 42 { // "0x" + 40 hex chars = 20 bytes
+			writeError(w, http.StatusBadRequest, "invalid sender address")
+			return
+		}
 		b, err := decodeHexBytes(s)
-		if err != nil || len(b) != 20 {
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid sender address")
 			return
 		}
@@ -86,8 +90,12 @@ func (h *Handler) ListOperations(w http.ResponseWriter, r *http.Request) {
 // GetOperation handles GET /api/operations/{hash}.
 func (h *Handler) GetOperation(w http.ResponseWriter, r *http.Request) {
 	raw := r.PathValue("hash")
+	if len(raw) != 66 { // "0x" + 64 hex chars = 32 bytes
+		writeError(w, http.StatusBadRequest, "invalid userOpHash")
+		return
+	}
 	hash, err := decodeHexBytes(raw)
-	if err != nil || len(hash) != 32 {
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid userOpHash")
 		return
 	}
