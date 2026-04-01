@@ -67,8 +67,8 @@ class WalletState {
 			this.unlisten();
 			this.listen();
 		} catch (e) {
-			this.error = e instanceof Error ? e.message : 'Failed to connect wallet';
 			this.reset();
+			this.error = e instanceof Error ? e.message : 'Failed to connect wallet';
 		}
 	}
 
@@ -81,6 +81,7 @@ class WalletState {
 		this.address = null;
 		this.chainId = null;
 		this.client = null;
+		this.error = null;
 	}
 
 	private async switchToSepolia() {
@@ -101,13 +102,8 @@ class WalletState {
 							chainId: `0x${SEPOLIA_CHAIN_ID.toString(16)}`,
 							chainName: sepolia.name,
 							nativeCurrency: sepolia.nativeCurrency,
-							rpcUrls: [sepolia.rpcUrls.default.http[0]],
-							blockExplorers: [
-								{
-									name: sepolia.blockExplorers.default.name,
-									url: sepolia.blockExplorers.default.url
-								}
-							]
+						rpcUrls: [sepolia.rpcUrls.default.http[0]],
+						blockExplorerUrls: [sepolia.blockExplorers.default.url]
 						}
 					]
 				});
@@ -134,7 +130,9 @@ class WalletState {
 
 	private onChainChanged = (chainIdHex: string) => {
 		this.chainId = Number(chainIdHex);
-		if (this.chainId !== SEPOLIA_CHAIN_ID) {
+		if (this.chainId === SEPOLIA_CHAIN_ID) {
+			this.error = null;
+		} else {
 			this.switchToSepolia()
 				.then(() => {
 					this.chainId = SEPOLIA_CHAIN_ID;
