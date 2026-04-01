@@ -37,13 +37,23 @@ class WalletState {
 		}
 
 		try {
-			const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+			const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+			if (!accounts.length) {
+				this.error = 'No account selected.';
+				return;
+			}
+			const account = accounts[0];
 
 			const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
 			const chainId = Number(chainIdHex);
 
 			if (chainId !== SEPOLIA_CHAIN_ID) {
 				await this.switchToSepolia();
+				const verifiedHex = await window.ethereum!.request({ method: 'eth_chainId' });
+				if (Number(verifiedHex) !== SEPOLIA_CHAIN_ID) {
+					this.error = 'Please switch to the Sepolia network.';
+					return;
+				}
 			}
 
 			this.client = createWalletClient({
@@ -54,6 +64,7 @@ class WalletState {
 			this.address = account as `0x${string}`;
 			this.chainId = SEPOLIA_CHAIN_ID;
 
+			this.unlisten();
 			this.listen();
 		} catch (e) {
 			this.error = e instanceof Error ? e.message : 'Failed to connect wallet';
@@ -124,9 +135,13 @@ class WalletState {
 	private onChainChanged = (chainIdHex: string) => {
 		this.chainId = Number(chainIdHex);
 		if (this.chainId !== SEPOLIA_CHAIN_ID) {
-			this.switchToSepolia().catch(() => {
-				this.error = 'Please switch to Sepolia network.';
-			});
+			this.switchToSepolia()
+				.then(() => {
+					this.chainId = SEPOLIA_CHAIN_ID;
+				})
+				.catch(() => {
+					this.error = 'Please switch to Sepolia network.';
+				});
 		}
 	};
 
