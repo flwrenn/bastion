@@ -32,6 +32,7 @@ func TestListOperationsClampsPagination(t *testing.T) {
 		{"negative limit defaults to 20", -5, 0, 20, 0},
 		{"over-100 clamped to 100", 200, 0, 100, 0},
 		{"negative offset clamped to 0", 10, -3, 10, 0},
+		{"over-10000 offset clamped to 10000", 20, 20000, 20, 10000},
 		{"valid values unchanged", 50, 10, 50, 10},
 	}
 
@@ -39,7 +40,7 @@ func TestListOperationsClampsPagination(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			p := ListParams{Limit: tt.limit, Offset: tt.offset}
-			clampListParams(&p)
+			ClampListParams(&p)
 			if p.Limit != tt.wantLimit {
 				t.Fatalf("limit: got %d, want %d", p.Limit, tt.wantLimit)
 			}

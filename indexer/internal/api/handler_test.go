@@ -213,6 +213,40 @@ func TestGetOperationShortHash(t *testing.T) {
 	}
 }
 
+func TestListOperationsClampedResponse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		query      string
+		wantLimit  int
+		wantOffset int
+	}{
+		{"over-max limit clamped to 100", "?limit=200", 100, 0},
+		{"zero limit defaults to 20", "?limit=0", 20, 0},
+		{"negative offset clamped to 0", "?offset=-5", 20, 0},
+		{"over-max offset clamped to 10000", "?offset=20000", 20, 10000},
+		{"combined out-of-range", "?limit=999&offset=-1", 100, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := db.ListParams{
+				Limit:  intQuery(httptest.NewRequest(http.MethodGet, "/api/operations"+tt.query, nil), "limit", 20),
+				Offset: intQuery(httptest.NewRequest(http.MethodGet, "/api/operations"+tt.query, nil), "offset", 0),
+			}
+			db.ClampListParams(&p)
+			if p.Limit != tt.wantLimit {
+				t.Fatalf("limit: got %d, want %d", p.Limit, tt.wantLimit)
+			}
+			if p.Offset != tt.wantOffset {
+				t.Fatalf("offset: got %d, want %d", p.Offset, tt.wantOffset)
+			}
+		})
+	}
+}
+
 func TestToResponse(t *testing.T) {
 	t.Parallel()
 

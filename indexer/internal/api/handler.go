@@ -52,6 +52,7 @@ func (h *Handler) ListOperations(w http.ResponseWriter, r *http.Request) {
 		Limit:  intQuery(r, "limit", 20),
 		Offset: intQuery(r, "offset", 0),
 	}
+	db.ClampListParams(&params)
 
 	if s := r.URL.Query().Get("sender"); s != "" {
 		b, err := decodeHexBytes(s)
