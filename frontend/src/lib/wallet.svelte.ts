@@ -134,8 +134,15 @@ class WalletState {
 			this.error = null;
 		} else {
 			this.switchToSepolia()
-				.then(() => {
-					this.chainId = SEPOLIA_CHAIN_ID;
+				.then(async () => {
+					const hex = await window.ethereum!.request({ method: 'eth_chainId' });
+					const verified = Number(hex);
+					if (verified === SEPOLIA_CHAIN_ID) {
+						this.chainId = SEPOLIA_CHAIN_ID;
+						this.error = null;
+					} else {
+						this.error = 'Please switch to Sepolia network.';
+					}
 				})
 				.catch(() => {
 					this.error = 'Please switch to Sepolia network.';
