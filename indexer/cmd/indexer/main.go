@@ -72,9 +72,13 @@ func run() error {
 
 	mux := http.NewServeMux()
 
+	// API routes — CORS enabled for frontend access.
+	apiMux := http.NewServeMux()
 	apiHandler := api.New(pool)
-	apiHandler.Register(mux)
+	apiHandler.Register(apiMux)
+	mux.Handle("/api/", api.CORS(apiMux))
 
+	// Health endpoints — no CORS (internal probes only).
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"name":"bastion-indexer","status":"ok"}`)
@@ -95,7 +99,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: api.CORS(mux),
+		Handler: mux,
 	}
 
 	// Shut down gracefully on signal, draining in-flight requests.

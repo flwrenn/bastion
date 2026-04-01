@@ -130,7 +130,9 @@ func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*
 		       nonce, success, actual_gas_cost, actual_gas_used,
 		       tx_hash, block_number, block_timestamp, log_index
 		FROM user_operations
-		WHERE user_op_hash = $1`,
+		WHERE user_op_hash = $1
+		ORDER BY block_number DESC, log_index DESC
+		LIMIT 1`,
 		hash,
 	).Scan(
 		&op.ID,
