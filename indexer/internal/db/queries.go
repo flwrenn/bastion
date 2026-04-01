@@ -16,7 +16,10 @@ type ListParams struct {
 	Offset int
 }
 
-func clampListParams(p *ListParams) {
+// ClampListParams normalises pagination values to safe defaults.
+// It is exported so the API handler can clamp before calling ListOperations
+// and echo the effective values in the response.
+func ClampListParams(p *ListParams) {
 	if p.Limit <= 0 {
 		p.Limit = 20
 	}
@@ -37,7 +40,7 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	if pool == nil {
 		return nil, 0, errors.New("pool is required")
 	}
-	clampListParams(&p)
+	ClampListParams(&p)
 
 	var total int64
 	var rows pgx.Rows
