@@ -201,7 +201,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func encodeHex(b []byte) string {
-	if len(b) == 0 {
+	if b == nil {
 		return ""
 	}
 	return "0x" + hex.EncodeToString(b)
