@@ -102,8 +102,8 @@ class WalletState {
 							chainId: `0x${SEPOLIA_CHAIN_ID.toString(16)}`,
 							chainName: sepolia.name,
 							nativeCurrency: sepolia.nativeCurrency,
-						rpcUrls: [sepolia.rpcUrls.default.http[0]],
-						blockExplorerUrls: [sepolia.blockExplorers.default.url]
+							rpcUrls: [sepolia.rpcUrls.default.http[0]],
+							blockExplorerUrls: [sepolia.blockExplorers.default.url]
 						}
 					]
 				});
@@ -141,11 +141,11 @@ class WalletState {
 						this.chainId = SEPOLIA_CHAIN_ID;
 						this.error = null;
 					} else {
-						this.error = 'Please switch to Sepolia network.';
+						this.error = 'Please switch to the Sepolia network.';
 					}
 				})
 				.catch(() => {
-					this.error = 'Please switch to Sepolia network.';
+					this.error = 'Please switch to the Sepolia network.';
 				});
 		}
 	};
