@@ -206,15 +206,3 @@ func TestSubscriptionConnectTimeoutUsesRequestTimeout(t *testing.T) {
 		t.Fatalf("expected request timeout %s, got %s", 7*time.Second, got)
 	}
 }
-
-func TestOriginForWebSocketURL_DerivesHostBasedOrigin(t *testing.T) {
-	t.Parallel()
-
-	if got := originForWebSocketURL("wss://rpc.example/ws?key=secret"); got != "https://rpc.example" {
-		t.Fatalf("expected https origin, got %q", got)
-	}
-
-	if got := originForWebSocketURL("ws://localhost:8546/path"); got != "http://localhost:8546" {
-		t.Fatalf("expected http origin with port, got %q", got)
-	}
-}

@@ -3,8 +3,8 @@ module github.com/flwrenn/bastion/indexer
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/jackc/pgx/v5 v5.8.0
-	golang.org/x/net v0.52.0
 )
 
 require (
