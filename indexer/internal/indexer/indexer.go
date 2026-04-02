@@ -26,6 +26,10 @@ type Service struct {
 	newHeadSubscriptionFactory   func(context.Context, string) (headSubscription, error)
 	subscriptionReconnectBackoff time.Duration
 	indexOnceFunc                func(context.Context) error
+
+	// OnOperationsIndexed is called after new operations are persisted.
+	// It is safe to leave nil.
+	OnOperationsIndexed func([]db.UserOperation)
 }
 
 const blockTimestampCacheMaxEntries = 4096
@@ -606,6 +610,10 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		"events",
 		len(operations),
 	)
+
+	if len(operations) > 0 && s.OnOperationsIndexed != nil {
+		s.OnOperationsIndexed(operations)
+	}
 
 	return nil
 }
