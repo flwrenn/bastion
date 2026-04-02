@@ -61,6 +61,10 @@ func run() error {
 		return fmt.Errorf("init indexer service: %w", err)
 	}
 
+	// WebSocket live feed — broadcasts new operations to connected clients.
+	hub := api.NewHub()
+	svc.OnOperationsIndexed = hub.Broadcast
+
 	workerResultCh := make(chan error, 1)
 	go func() {
 		runErr := svc.Run(ctx)
@@ -77,6 +81,9 @@ func run() error {
 	apiHandler := api.New(pool)
 	apiHandler.Register(apiMux)
 	mux.Handle("/api/", api.CORS(apiMux))
+
+	// WebSocket live feed — outside /api/ (upgrade requests don't use CORS).
+	mux.HandleFunc("GET /ws", hub.ServeWS)
 
 	// Health endpoints — no CORS (internal probes only).
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +113,7 @@ func run() error {
 	go func() {
 		<-ctx.Done()
 		slog.Info("shutting down")
+		hub.Shutdown()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
