@@ -4,19 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/net/websocket"
+	"github.com/coder/websocket"
 )
 
 const (
 	subscriptionTypeNewHeads   = "newHeads"
 	defaultSubscriptionBackoff = 2 * time.Second
-	subscriptionIODeadline     = 500 * time.Millisecond
 )
 
 type headSubscription interface {
@@ -25,28 +21,23 @@ type headSubscription interface {
 }
 
 type websocketHeadSubscription struct {
-	ws        *websocket.Conn
+	conn      *websocket.Conn
 	nextMu    sync.Mutex
 	closeOnce sync.Once
 }
 
 func newWebSocketHeadSubscription(ctx context.Context, wsURL string) (headSubscription, error) {
-	config, err := websocket.NewConfig(wsURL, originForWebSocketURL(wsURL))
-	if err != nil {
-		return nil, fmt.Errorf("create websocket config: %w", err)
-	}
-
-	ws, err := config.DialContext(ctx)
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial websocket: %w", err)
 	}
 
-	if err := sendSubscribeRequest(ctx, ws); err != nil {
-		_ = ws.Close()
+	if err := sendSubscribeRequest(ctx, conn); err != nil {
+		conn.CloseNow()
 		return nil, err
 	}
 
-	sub := &websocketHeadSubscription{ws: ws}
+	sub := &websocketHeadSubscription{conn: conn}
 	if err := waitForSubscriptionAck(ctx, sub); err != nil {
 		_ = sub.Close()
 		return nil, err
@@ -55,7 +46,7 @@ func newWebSocketHeadSubscription(ctx context.Context, wsURL string) (headSubscr
 	return sub, nil
 }
 
-func sendSubscribeRequest(ctx context.Context, ws *websocket.Conn) error {
+func sendSubscribeRequest(ctx context.Context, conn *websocket.Conn) error {
 	payload, err := json.Marshal(rpcRequest{
 		JSONRPC: jsonRPCVersion,
 		ID:      1,
@@ -66,7 +57,7 @@ func sendSubscribeRequest(ctx context.Context, ws *websocket.Conn) error {
 		return fmt.Errorf("marshal subscribe request: %w", err)
 	}
 
-	if err := writeWebSocketMessage(ctx, ws, payload); err != nil {
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
 		return fmt.Errorf("send subscribe request: %w", err)
 	}
 
@@ -134,7 +125,7 @@ func (s *websocketHeadSubscription) Next(ctx context.Context) error {
 func (s *websocketHeadSubscription) Close() error {
 	var closeErr error
 	s.closeOnce.Do(func() {
-		closeErr = s.ws.Close()
+		closeErr = s.conn.Close(websocket.StatusNormalClosure, "")
 	})
 
 	return closeErr
@@ -144,53 +135,15 @@ func (s *websocketHeadSubscription) read(ctx context.Context) ([]byte, error) {
 	s.nextMu.Lock()
 	defer s.nextMu.Unlock()
 
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		readDeadline := time.Now().Add(subscriptionIODeadline)
-		if err := s.ws.SetReadDeadline(readDeadline); err != nil {
-			return nil, fmt.Errorf("set read deadline: %w", err)
-		}
-
-		var message []byte
-		err := websocket.Message.Receive(s.ws, &message)
-		if err == nil {
-			if len(message) == 0 {
-				continue
-			}
-			return message, nil
-		}
-
-		if ne, ok := err.(net.Error); ok && ne.Timeout() {
-			continue
-		}
-
+	_, message, err := s.conn.Read(ctx)
+	if err != nil {
 		return nil, err
 	}
-}
-
-func writeWebSocketMessage(ctx context.Context, ws *websocket.Conn, payload []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	if len(message) == 0 {
+		return s.read(ctx)
 	}
 
-	writeDeadline := time.Now().Add(subscriptionIODeadline)
-	if err := ws.SetWriteDeadline(writeDeadline); err != nil {
-		return fmt.Errorf("set write deadline: %w", err)
-	}
-
-	err := websocket.Message.Send(ws, payload)
-	if err == nil {
-		return nil
-	}
-
-	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		return fmt.Errorf("websocket write timeout: %w", err)
-	}
-
-	return err
+	return message, nil
 }
 
 type rpcSubscriptionNotification struct {
@@ -203,24 +156,6 @@ type rpcSubscriptionNotification struct {
 
 type rpcSubscriptionHead struct {
 	Number string `json:"number"`
-}
-
-func originForWebSocketURL(wsURL string) string {
-	parsed, err := url.Parse(wsURL)
-	if err == nil && parsed.Host != "" {
-		scheme := "http"
-		if strings.EqualFold(parsed.Scheme, "wss") {
-			scheme = "https"
-		}
-
-		return scheme + "://" + parsed.Host
-	}
-
-	if strings.HasPrefix(strings.ToLower(wsURL), "wss://") {
-		return "https://bastion.local"
-	}
-
-	return "http://bastion.local"
 }
 
 func decodeRPCError(message []byte) error {
