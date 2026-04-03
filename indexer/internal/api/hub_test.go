@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -143,10 +144,24 @@ func TestShutdownRejectsNewConnections(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	// Hub is shut down, so the server should close the connection promptly.
-	_, _, err = conn.Read(ctx)
+	// Use a short deadline so the test fails fast if the server doesn't
+	// close the connection, rather than silently passing on context timeout.
+	readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer readCancel()
+
+	_, _, err = conn.Read(readCtx)
 	if err == nil {
 		t.Fatal("expected connection to be closed after shutdown")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("server did not close connection promptly; timed out waiting")
+	}
+	var closeErr websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("expected websocket.CloseError, got %T: %v", err, err)
+	}
+	if closeErr.Code != websocket.StatusGoingAway {
+		t.Fatalf("close code = %v, want StatusGoingAway", closeErr.Code)
 	}
 }
 
