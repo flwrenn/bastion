@@ -135,15 +135,15 @@ func (s *websocketHeadSubscription) read(ctx context.Context) ([]byte, error) {
 	s.nextMu.Lock()
 	defer s.nextMu.Unlock()
 
-	_, message, err := s.conn.Read(ctx)
-	if err != nil {
-		return nil, err
+	for {
+		_, message, err := s.conn.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if len(message) > 0 {
+			return message, nil
+		}
 	}
-	if len(message) == 0 {
-		return s.read(ctx)
-	}
-
-	return message, nil
 }
 
 type rpcSubscriptionNotification struct {
