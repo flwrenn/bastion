@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -292,5 +294,346 @@ func testOp() db.UserOperation {
 		BlockNumber:    100,
 		BlockTimestamp: 1700000000,
 		LogIndex:       0,
+	}
+}
+
+// --- stub Store for happy-path tests ---
+
+// stubStore implements Store with canned return values.
+type stubStore struct {
+	listOps   []db.UserOperation
+	listTotal int64
+	listErr   error
+
+	getOp  *db.UserOperation
+	getErr error
+
+	stats    db.Stats
+	statsErr error
+}
+
+func (s *stubStore) ListOperations(_ context.Context, _ db.ListParams) ([]db.UserOperation, int64, error) {
+	return s.listOps, s.listTotal, s.listErr
+}
+
+func (s *stubStore) GetOperationByHash(_ context.Context, _ []byte) (*db.UserOperation, error) {
+	return s.getOp, s.getErr
+}
+
+func (s *stubStore) GetStats(_ context.Context) (db.Stats, error) {
+	return s.stats, s.statsErr
+}
+
+// newTestMux creates a Handler backed by the given Store and returns
+// the ServeMux with routes registered — ready for httptest.
+func newTestMux(store Store) *http.ServeMux {
+	mux := http.NewServeMux()
+	New(store).Register(mux)
+	return mux
+}
+
+// --- happy-path handler tests ---
+
+func TestListOperationsHappyPath(t *testing.T) {
+	t.Parallel()
+
+	op := testOp()
+	store := &stubStore{listOps: []db.UserOperation{op}, listTotal: 1}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/operations", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	var body listResponse
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1", body.Total)
+	}
+	if body.Limit != 20 {
+		t.Fatalf("limit = %d, want 20", body.Limit)
+	}
+	if body.Offset != 0 {
+		t.Fatalf("offset = %d, want 0", body.Offset)
+	}
+	if len(body.Data) != 1 {
+		t.Fatalf("len(data) = %d, want 1", len(body.Data))
+	}
+
+	got := body.Data[0]
+	if got.UserOpHash != "0x"+testHash {
+		t.Fatalf("userOpHash = %q, want 0x%s", got.UserOpHash, testHash)
+	}
+	if got.Sender != "0x"+testAddr {
+		t.Fatalf("sender = %q, want 0x%s", got.Sender, testAddr)
+	}
+	if got.Nonce != "42" {
+		t.Fatalf("nonce = %q, want 42", got.Nonce)
+	}
+	if !got.Success {
+		t.Fatal("expected success = true")
+	}
+	if got.ActualGasCost != "1000" {
+		t.Fatalf("actualGasCost = %q, want 1000", got.ActualGasCost)
+	}
+	if got.ActualGasUsed != "500" {
+		t.Fatalf("actualGasUsed = %q, want 500", got.ActualGasUsed)
+	}
+	if got.BlockNumber != 100 {
+		t.Fatalf("blockNumber = %d, want 100", got.BlockNumber)
+	}
+	if got.BlockTimestamp != 1700000000 {
+		t.Fatalf("blockTimestamp = %d, want 1700000000", got.BlockTimestamp)
+	}
+}
+
+func TestListOperationsEmpty(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{listOps: nil, listTotal: 0}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/operations", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body listResponse
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Total != 0 {
+		t.Fatalf("total = %d, want 0", body.Total)
+	}
+	if body.Data == nil {
+		t.Fatal("data should be empty slice, not nil")
+	}
+	if len(body.Data) != 0 {
+		t.Fatalf("len(data) = %d, want 0", len(body.Data))
+	}
+}
+
+func TestListOperationsCustomPagination(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{listOps: []db.UserOperation{testOp()}, listTotal: 50}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/operations?limit=10&offset=5", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var body listResponse
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Limit != 10 {
+		t.Fatalf("limit = %d, want 10", body.Limit)
+	}
+	if body.Offset != 5 {
+		t.Fatalf("offset = %d, want 5", body.Offset)
+	}
+	if body.Total != 50 {
+		t.Fatalf("total = %d, want 50", body.Total)
+	}
+}
+
+func TestListOperationsStoreError(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{listErr: errors.New("db down")}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/operations", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "internal error" {
+		t.Fatalf("error = %q, want %q", body["error"], "internal error")
+	}
+}
+
+func TestGetOperationHappyPath(t *testing.T) {
+	t.Parallel()
+
+	op := testOp()
+	store := &stubStore{getOp: &op}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/operations/0x"+testHash, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	var got operationResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.UserOpHash != "0x"+testHash {
+		t.Fatalf("userOpHash = %q, want 0x%s", got.UserOpHash, testHash)
+	}
+	if got.Sender != "0x"+testAddr {
+		t.Fatalf("sender = %q, want 0x%s", got.Sender, testAddr)
+	}
+	if got.Nonce != "42" {
+		t.Fatalf("nonce = %q, want 42", got.Nonce)
+	}
+	if !got.Success {
+		t.Fatal("expected success = true")
+	}
+	if got.BlockNumber != 100 {
+		t.Fatalf("blockNumber = %d, want 100", got.BlockNumber)
+	}
+}
+
+func TestGetOperationNotFound(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{getOp: nil}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/operations/0x"+testHash, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["error"] != "operation not found" {
+		t.Fatalf("error = %q, want %q", body["error"], "operation not found")
+	}
+}
+
+func TestGetOperationStoreError(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{getErr: errors.New("db down")}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet,
+		"/api/operations/0x"+testHash, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestGetStatsHappyPath(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{
+		stats: db.Stats{
+			TotalOps:      100,
+			SuccessCount:  75,
+			UniqueSenders: 10,
+		},
+	}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+
+	var got statsResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.TotalOps != 100 {
+		t.Fatalf("totalOps = %d, want 100", got.TotalOps)
+	}
+	if got.SuccessCount != 75 {
+		t.Fatalf("successCount = %d, want 75", got.SuccessCount)
+	}
+	if got.UniqueSenders != 10 {
+		t.Fatalf("uniqueSenders = %d, want 10", got.UniqueSenders)
+	}
+	wantRate := 0.75
+	if got.SuccessRate != wantRate {
+		t.Fatalf("successRate = %f, want %f", got.SuccessRate, wantRate)
+	}
+}
+
+func TestGetStatsZeroOps(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{stats: db.Stats{}}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var got statsResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got.TotalOps != 0 {
+		t.Fatalf("totalOps = %d, want 0", got.TotalOps)
+	}
+	if got.SuccessRate != 0 {
+		t.Fatalf("successRate = %f, want 0 (avoid division by zero)", got.SuccessRate)
+	}
+}
+
+func TestGetStatsStoreError(t *testing.T) {
+	t.Parallel()
+
+	store := &stubStore{statsErr: errors.New("db down")}
+	mux := newTestMux(store)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 }
