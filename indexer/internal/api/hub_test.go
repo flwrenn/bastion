@@ -139,12 +139,11 @@ func TestShutdownRejectsNewConnections(t *testing.T) {
 	wsURL := "ws" + srv.URL[len("http"):]
 	conn, _, err := websocket.Dial(ctx, wsURL+"/ws", nil)
 	if err != nil {
-		// Connection refused or upgrade failed — acceptable.
-		return
+		t.Fatalf("dial: %v", err)
 	}
 	defer conn.CloseNow()
 
-	// If the connection was accepted, the server should close it promptly.
+	// Hub is shut down, so the server should close the connection promptly.
 	_, _, err = conn.Read(ctx)
 	if err == nil {
 		t.Fatal("expected connection to be closed after shutdown")

@@ -58,9 +58,12 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 			select {
 			case c.send <- msg:
 			default:
-				// Slow client — drop it and close the connection so any
-				// blocked Write unblocks promptly.
+				// Slow client — drop it and force-close the connection
+				// so any blocked Write unblocks promptly.
 				h.removeClientLocked(c)
+				if c.conn != nil {
+					c.conn.CloseNow()
+				}
 				break
 			}
 		}
@@ -133,11 +136,15 @@ func (h *Hub) Shutdown() {
 	h.closed = true
 	for c := range h.clients {
 		h.removeClientLocked(c)
+		if c.conn != nil {
+			c.conn.CloseNow()
+		}
 	}
 }
 
-// removeClientLocked removes a client, closes its send channel, and forces
-// the underlying WebSocket connection closed so any blocked write unblocks.
+// removeClientLocked removes a client from the map and closes its send
+// channel. The caller is responsible for closing the underlying WebSocket
+// connection (gracefully via Close or forcefully via CloseNow).
 // Caller must hold h.mu.
 func (h *Hub) removeClientLocked(c *wsClient) {
 	if _, ok := h.clients[c]; !ok {
@@ -145,7 +152,4 @@ func (h *Hub) removeClientLocked(c *wsClient) {
 	}
 	delete(h.clients, c)
 	close(c.send)
-	if c.conn != nil {
-		c.conn.CloseNow()
-	}
 }
