@@ -1,12 +1,15 @@
+import { env } from '$env/dynamic/public';
 import { formatEther } from 'viem';
 
-const INDEXER_URL = import.meta.env.PUBLIC_INDEXER_URL ?? 'http://localhost:3001';
-const WS_URL = INDEXER_URL.replace(/^http/, 'ws') + '/ws';
-const API_URL = INDEXER_URL + '/api/operations';
+/** Resolve the indexer base URL lazily so $env/dynamic/public is read at call time. */
+function indexerUrl(): string {
+	return env.PUBLIC_INDEXER_URL ?? 'http://localhost:3001';
+}
 
 const POLL_INTERVAL = 5_000;
 const RECONNECT_DELAY = 3_000;
 const MAX_OPERATIONS = 200;
+const MAX_POLL_FAILURES = 3;
 
 /** Shape returned by the indexer REST API and WebSocket feed. */
 export interface UserOperation {
@@ -32,6 +35,11 @@ const ETHERSCAN_BASE = 'https://sepolia.etherscan.io';
 /** Returns a Sepolia Etherscan link for a transaction hash. */
 export function etherscanTx(txHash: string): string {
 	return `${ETHERSCAN_BASE}/tx/${txHash}`;
+}
+
+/** Returns a Sepolia Etherscan link for a block number. */
+export function etherscanBlock(blockNumber: number): string {
+	return `${ETHERSCAN_BASE}/block/${blockNumber}`;
 }
 
 /** Returns a Sepolia Etherscan link for an address. */
@@ -72,9 +80,13 @@ class IndexerFeed {
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private seenHashes = new Set<string>();
+	private abort: AbortController | null = null;
+	private pollFailures = 0;
 
 	/** Open the WebSocket connection and load initial data from REST. */
 	connect() {
+		this.disconnect(); // Idempotent — tear down any previous session first.
+		this.abort = new AbortController();
 		this.status = 'connecting';
 		this.loadInitial();
 		this.openWS();
@@ -84,11 +96,14 @@ class IndexerFeed {
 	disconnect() {
 		this.stopReconnect();
 		this.stopPolling();
+		this.abort?.abort();
+		this.abort = null;
 		if (this.ws) {
 			this.ws.onclose = null; // Prevent reconnect on intentional close.
 			this.ws.close();
 			this.ws = null;
 		}
+		this.pollFailures = 0;
 		this.status = 'disconnected';
 	}
 
@@ -96,7 +111,8 @@ class IndexerFeed {
 
 	private openWS() {
 		try {
-			const ws = new WebSocket(WS_URL);
+			const wsUrl = indexerUrl().replace(/^http/, 'ws') + '/ws';
+			const ws = new WebSocket(wsUrl);
 
 			ws.onopen = () => {
 				this.status = 'connected';
@@ -163,22 +179,40 @@ class IndexerFeed {
 
 	private async poll() {
 		try {
-			const res = await fetch(`${API_URL}?limit=20`);
-			if (!res.ok) return;
+			const apiUrl = indexerUrl() + '/api/operations';
+			const res = await fetch(`${apiUrl}?limit=20`, { signal: this.abort?.signal });
+			if (!res.ok) {
+				this.trackPollFailure();
+				return;
+			}
+			this.pollFailures = 0;
 			const body: { data: UserOperation[] } = await res.json();
 			// REST returns newest first; reverse so addOperation prepends correctly.
 			for (const op of body.data.reverse()) {
 				this.addOperation(op);
 			}
 		} catch {
-			// Network error — will retry on next interval.
+			// Ignore AbortError from disconnect(); track real failures.
+			if (!this.abort?.signal.aborted) {
+				this.trackPollFailure();
+			}
+		}
+	}
+
+	private trackPollFailure() {
+		this.pollFailures++;
+		if (this.pollFailures >= MAX_POLL_FAILURES) {
+			this.stopPolling();
+			this.stopReconnect();
+			this.status = 'disconnected';
 		}
 	}
 
 	/** Load the most recent operations from the REST API (initial page load). */
 	private async loadInitial() {
 		try {
-			const res = await fetch(`${API_URL}?limit=50`);
+			const apiUrl = indexerUrl() + '/api/operations';
+			const res = await fetch(`${apiUrl}?limit=50`, { signal: this.abort?.signal });
 			if (!res.ok) return;
 			const body: { data: UserOperation[] } = await res.json();
 			// REST returns newest first — add in reverse so newest ends up at index 0.
