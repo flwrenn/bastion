@@ -41,6 +41,17 @@ func NewHub() *Hub {
 // Broadcast converts each operation to JSON and sends it to every connected
 // client. Slow consumers whose buffer is full are dropped immediately.
 func (h *Hub) Broadcast(ops []db.UserOperation) {
+	if len(ops) == 0 {
+		return
+	}
+
+	h.mu.Lock()
+	empty := len(h.clients) == 0 || h.closed
+	h.mu.Unlock()
+	if empty {
+		return
+	}
+
 	messages := make([][]byte, 0, len(ops))
 	for i := range ops {
 		data, err := json.Marshal(toResponse(ops[i]))
