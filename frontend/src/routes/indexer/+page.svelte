@@ -2,6 +2,7 @@
 	import {
 		feed,
 		etherscanTx,
+		etherscanBlock,
 		etherscanAddress,
 		formatGasCost,
 		truncateHex,
@@ -36,6 +37,21 @@
 	function isSponsored(paymaster: string): boolean {
 		return !!paymaster && paymaster !== '0x' && paymaster !== '0x' + '0'.repeat(40);
 	}
+
+	/** Auto-scroll: keep the table scrolled to top when new ops arrive (if user is near top). */
+	let tableContainer: HTMLDivElement | undefined = $state();
+	let prevCount = 0;
+
+	$effect(() => {
+		const count = feed.operations.length;
+		if (count > prevCount && tableContainer) {
+			// Only auto-scroll if the user hasn't scrolled down more than 100px.
+			if (tableContainer.scrollTop < 100) {
+				tableContainer.scrollTo({ top: 0, behavior: 'smooth' });
+			}
+		}
+		prevCount = count;
+	});
 </script>
 
 <svelte:head><title>Indexer Live Feed | Bastion</title></svelte:head>
@@ -63,7 +79,7 @@
 			</p>
 		</div>
 	{:else}
-		<div class="overflow-x-auto rounded-lg border border-zinc-800">
+		<div bind:this={tableContainer} class="overflow-x-auto rounded-lg border border-zinc-800">
 			<table class="w-full text-left text-sm">
 				<thead
 					class="border-b border-zinc-700 bg-zinc-800/80 text-xs tracking-wider text-zinc-400 uppercase"
@@ -92,7 +108,7 @@
 								<a
 									href={etherscanAddress(op.sender)}
 									target="_blank"
-									rel="noopener"
+									rel="noopener noreferrer"
 									class="text-indigo-400 hover:text-indigo-300"
 								>
 									{truncateHex(op.sender)}
@@ -105,7 +121,7 @@
 									<a
 										href={etherscanAddress(op.paymaster)}
 										target="_blank"
-										rel="noopener"
+										rel="noopener noreferrer"
 										class="text-indigo-400 hover:text-indigo-300"
 									>
 										{truncateHex(op.paymaster)}
@@ -145,9 +161,9 @@
 							<!-- Block -->
 							<td class="px-4 py-3 text-right font-mono text-xs">
 								<a
-									href="{etherscanTx(op.txHash).replace(/\/tx\/.*/, '')}/block/{op.blockNumber}"
+									href={etherscanBlock(op.blockNumber)}
 									target="_blank"
-									rel="noopener"
+									rel="noopener noreferrer"
 									class="text-indigo-400 hover:text-indigo-300"
 								>
 									{op.blockNumber}
@@ -164,7 +180,7 @@
 								<a
 									href={etherscanTx(op.txHash)}
 									target="_blank"
-									rel="noopener"
+									rel="noopener noreferrer"
 									class="text-indigo-400 hover:text-indigo-300"
 									title={op.txHash}
 								>
