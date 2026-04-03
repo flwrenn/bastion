@@ -10,17 +10,16 @@ import (
 	"strings"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Handler serves the indexer REST API.
 type Handler struct {
-	pool *pgxpool.Pool
+	store Store
 }
 
-// New creates an API handler backed by the given connection pool.
-func New(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool}
+// New creates an API handler backed by the given Store implementation.
+func New(store Store) *Handler {
+	return &Handler{store: store}
 }
 
 // Register mounts all API routes on the provided mux.
@@ -67,7 +66,7 @@ func (h *Handler) ListOperations(w http.ResponseWriter, r *http.Request) {
 		params.Sender = b
 	}
 
-	ops, total, err := db.ListOperations(r.Context(), h.pool, params)
+	ops, total, err := h.store.ListOperations(r.Context(), params)
 	if err != nil {
 		slog.Error("list operations", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -100,7 +99,7 @@ func (h *Handler) GetOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	op, err := db.GetOperationByHash(r.Context(), h.pool, hash)
+	op, err := h.store.GetOperationByHash(r.Context(), hash)
 	if err != nil {
 		slog.Error("get operation", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -116,7 +115,7 @@ func (h *Handler) GetOperation(w http.ResponseWriter, r *http.Request) {
 
 // GetStats handles GET /api/stats.
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
-	s, err := db.GetStats(r.Context(), h.pool)
+	s, err := h.store.GetStats(r.Context())
 	if err != nil {
 		slog.Error("get stats", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

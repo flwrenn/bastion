@@ -78,7 +78,7 @@ func run() error {
 
 	// API routes — CORS enabled for frontend access.
 	apiMux := http.NewServeMux()
-	apiHandler := api.New(pool)
+	apiHandler := api.New(&api.PgStore{Pool: pool})
 	apiHandler.Register(apiMux)
 	mux.Handle("/api/", api.CORS(apiMux))
 
