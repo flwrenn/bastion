@@ -8,6 +8,7 @@ function indexerUrl(): string {
 
 const POLL_INTERVAL = 5_000;
 const RECONNECT_DELAY = 3_000;
+const MAX_RECONNECT_DELAY = 30_000;
 const MAX_OPERATIONS = 200;
 const MAX_POLL_FAILURES = 3;
 
@@ -82,11 +83,13 @@ class IndexerFeed {
 	private seenHashes = new Set<string>();
 	private abort: AbortController | null = null;
 	private pollFailures = 0;
+	private reconnectDelay = RECONNECT_DELAY;
 
 	/** Open the WebSocket connection and load initial data from REST. */
 	connect() {
 		this.disconnect(); // Idempotent — tear down any previous session first.
 		this.abort = new AbortController();
+		this.reconnectDelay = RECONNECT_DELAY;
 		this.status = 'connecting';
 		this.loadInitial();
 		this.openWS();
@@ -116,6 +119,7 @@ class IndexerFeed {
 
 			ws.onopen = () => {
 				this.status = 'connected';
+				this.reconnectDelay = RECONNECT_DELAY;
 				this.stopPolling();
 			};
 
@@ -142,16 +146,17 @@ class IndexerFeed {
 		} catch {
 			// WebSocket constructor can throw if the URL is invalid.
 			this.startPolling();
+			this.scheduleReconnect();
 		}
 	}
 
 	private scheduleReconnect() {
 		this.stopReconnect();
+		const delay = this.reconnectDelay;
+		this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY);
 		this.reconnectTimer = setTimeout(() => {
-			if (this.status !== 'disconnected') {
-				this.openWS();
-			}
-		}, RECONNECT_DELAY);
+			this.openWS();
+		}, delay);
 	}
 
 	private stopReconnect() {
@@ -165,6 +170,7 @@ class IndexerFeed {
 
 	private startPolling() {
 		if (this.pollTimer !== null) return;
+		this.pollFailures = 0;
 		this.status = 'polling';
 		this.poll();
 		this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL);
@@ -202,8 +208,9 @@ class IndexerFeed {
 	private trackPollFailure() {
 		this.pollFailures++;
 		if (this.pollFailures >= MAX_POLL_FAILURES) {
+			// Stop hammering a dead REST API, but keep the WS reconnect loop
+			// running so recovery happens automatically when the indexer restarts.
 			this.stopPolling();
-			this.stopReconnect();
 			this.status = 'disconnected';
 		}
 	}
