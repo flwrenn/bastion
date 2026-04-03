@@ -13,7 +13,11 @@ import (
 )
 
 const (
-	clientSendBuffer = 32
+	// clientSendBuffer is sized to absorb catch-up bursts (e.g. 50-100 ops
+	// after brief downtime) without dropping healthy clients. Backfill
+	// volumes can far exceed any reasonable buffer; clients needing
+	// historical data should use the REST API.
+	clientSendBuffer = 128
 	writeTimeout     = 5 * time.Second
 )
 
