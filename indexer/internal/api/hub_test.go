@@ -12,6 +12,28 @@ import (
 	"github.com/flwrenn/bastion/indexer/internal/db"
 )
 
+// waitForClients polls hub.clients until it reaches n or the deadline expires.
+func waitForClients(t *testing.T, hub *Hub, n int, deadline time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		hub.mu.Lock()
+		count := len(hub.clients)
+		hub.mu.Unlock()
+		if count >= n {
+			return
+		}
+		select {
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %d client(s), have %d", n, count)
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestBroadcastNoClients(t *testing.T) {
 	t.Parallel()
 
@@ -150,8 +172,7 @@ func TestServeWSEndToEnd(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	// Give the server goroutine a moment to register the client.
-	time.Sleep(50 * time.Millisecond)
+	waitForClients(t, hub, 1, 2*time.Second)
 
 	hub.Broadcast([]db.UserOperation{testOp()})
 
@@ -193,7 +214,7 @@ func TestServeWSMultipleMessages(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForClients(t, hub, 1, 2*time.Second)
 
 	// Broadcast two operations in one batch.
 	op1 := testOp()

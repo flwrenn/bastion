@@ -1,16 +1,21 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/flwrenn/bastion/indexer/internal/db"
 )
 
-const clientSendBuffer = 32
+const (
+	clientSendBuffer = 32
+	writeTimeout     = 5 * time.Second
+)
 
 // Hub manages WebSocket clients and broadcasts new operations to them.
 type Hub struct {
@@ -21,6 +26,7 @@ type Hub struct {
 
 type wsClient struct {
 	send chan []byte
+	conn *websocket.Conn
 }
 
 // NewHub creates a Hub ready to accept WebSocket connections.
@@ -52,7 +58,8 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 			select {
 			case c.send <- msg:
 			default:
-				// Slow client — drop it.
+				// Slow client — drop it and close the connection so any
+				// blocked Write unblocks promptly.
 				h.removeClientLocked(c)
 				break
 			}
@@ -64,14 +71,17 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 // broadcast messages until the client disconnects or the hub shuts down.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // Allow all origins (frontend is cross-origin).
+		OriginPatterns: []string{"*"},
 	})
 	if err != nil {
 		slog.Error("websocket accept", "error", err)
 		return
 	}
 
-	client := &wsClient{send: make(chan []byte, clientSendBuffer)}
+	client := &wsClient{
+		send: make(chan []byte, clientSendBuffer),
+		conn: conn,
+	}
 
 	h.mu.Lock()
 	if h.closed {
@@ -105,7 +115,10 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 				// Channel closed by Shutdown or Broadcast (slow client).
 				return
 			}
-			if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
+			writeCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+			err := conn.Write(writeCtx, websocket.MessageText, msg)
+			cancel()
+			if err != nil {
 				return
 			}
 		}
@@ -123,7 +136,8 @@ func (h *Hub) Shutdown() {
 	}
 }
 
-// removeClientLocked removes a client and closes its send channel.
+// removeClientLocked removes a client, closes its send channel, and forces
+// the underlying WebSocket connection closed so any blocked write unblocks.
 // Caller must hold h.mu.
 func (h *Hub) removeClientLocked(c *wsClient) {
 	if _, ok := h.clients[c]; !ok {
@@ -131,4 +145,7 @@ func (h *Hub) removeClientLocked(c *wsClient) {
 	}
 	delete(h.clients, c)
 	close(c.send)
+	if c.conn != nil {
+		c.conn.CloseNow()
+	}
 }
