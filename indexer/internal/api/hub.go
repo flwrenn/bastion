@@ -50,22 +50,27 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	var slow []*wsClient
 
+	h.mu.Lock()
 	for c := range h.clients {
 		for _, msg := range messages {
 			select {
 			case c.send <- msg:
 			default:
-				// Slow client — drop it and force-close the connection
-				// so any blocked Write unblocks promptly.
 				h.removeClientLocked(c)
-				if c.conn != nil {
-					c.conn.CloseNow()
-				}
+				slow = append(slow, c)
 				break
 			}
+		}
+	}
+	h.mu.Unlock()
+
+	// Force-close slow clients outside the lock so CloseNow never
+	// stalls other goroutines waiting on h.mu.
+	for _, c := range slow {
+		if c.conn != nil {
+			c.conn.CloseNow()
 		}
 	}
 }
@@ -73,6 +78,9 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 // ServeWS upgrades an HTTP request to a WebSocket connection and streams
 // broadcast messages until the client disconnects or the hub shuts down.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
+	// Allow any origin: this endpoint is read-only, unauthenticated, and
+	// broadcasts publicly available on-chain data. Cross-site WebSocket
+	// hijacking is not a concern without session-based auth or private data.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{"*"},
 	})
@@ -131,11 +139,15 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 // Shutdown closes every connected client and prevents new connections.
 func (h *Hub) Shutdown() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	clients := make([]*wsClient, 0, len(h.clients))
 	h.closed = true
 	for c := range h.clients {
 		h.removeClientLocked(c)
+		clients = append(clients, c)
+	}
+	h.mu.Unlock()
+
+	for _, c := range clients {
 		if c.conn != nil {
 			c.conn.CloseNow()
 		}
