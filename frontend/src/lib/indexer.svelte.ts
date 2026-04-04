@@ -3,7 +3,7 @@ import { formatEther } from 'viem';
 
 /** Resolve the indexer base URL lazily so $env/dynamic/public is read at call time. */
 function indexerUrl(): string {
-	return env.PUBLIC_INDEXER_URL ?? 'http://localhost:3001';
+	return (env.PUBLIC_INDEXER_URL ?? 'http://localhost:3001').replace(/\/+$/, '');
 }
 
 const POLL_INTERVAL = 5_000;
