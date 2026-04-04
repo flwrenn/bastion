@@ -184,9 +184,10 @@ class IndexerFeed {
 	}
 
 	private async poll() {
+		const signal = this.abort?.signal;
 		try {
 			const apiUrl = indexerUrl() + '/api/operations';
-			const res = await fetch(`${apiUrl}?limit=20`, { signal: this.abort?.signal });
+			const res = await fetch(`${apiUrl}?limit=20`, { signal });
 			if (!res.ok) {
 				this.trackPollFailure();
 				return;
@@ -199,7 +200,9 @@ class IndexerFeed {
 			}
 		} catch {
 			// Ignore AbortError from disconnect(); track real failures.
-			if (!this.abort?.signal.aborted) {
+			// Check the captured signal, not this.abort, to avoid races with
+			// rapid disconnect/connect replacing the controller.
+			if (!signal?.aborted) {
 				this.trackPollFailure();
 			}
 		}
@@ -217,9 +220,10 @@ class IndexerFeed {
 
 	/** Load the most recent operations from the REST API (initial page load). */
 	private async loadInitial() {
+		const signal = this.abort?.signal;
 		try {
 			const apiUrl = indexerUrl() + '/api/operations';
-			const res = await fetch(`${apiUrl}?limit=50`, { signal: this.abort?.signal });
+			const res = await fetch(`${apiUrl}?limit=50`, { signal });
 			if (!res.ok) return;
 			const body: { data: UserOperation[] } = await res.json();
 			// REST returns newest first — add in reverse so newest ends up at index 0.
