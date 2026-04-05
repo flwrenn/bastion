@@ -59,24 +59,27 @@
 							</dd>
 						</div>
 					{:else if !account.error}
-						<div class="text-zinc-400">Loading account...</div>
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">Account Address</dt>
+							<dd class="text-zinc-400">Loading...</dd>
+						</div>
 					{/if}
 
-				{#if account.deployUserOpHash}
-					<div class="flex justify-between">
-						<dt class="text-zinc-400">UserOp Hash</dt>
-						<dd class="font-mono text-sm">
-							<a
-								href="https://jiffyscan.xyz/userOpHash/{account.deployUserOpHash}?network=sepolia"
-								target="_blank"
-								rel="noopener noreferrer"
-								class="text-indigo-400 hover:text-indigo-300"
-							>
-								{truncateHex(account.deployUserOpHash)}
-							</a>
-						</dd>
-					</div>
-				{/if}
+					{#if account.deployUserOpHash}
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">UserOp Hash</dt>
+							<dd class="font-mono text-sm">
+								<a
+									href="https://jiffyscan.xyz/userOpHash/{account.deployUserOpHash}?network=sepolia"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-indigo-400 hover:text-indigo-300"
+								>
+									{truncateHex(account.deployUserOpHash)}
+								</a>
+							</dd>
+						</div>
+					{/if}
 				</dl>
 
 				{#if account.error}
