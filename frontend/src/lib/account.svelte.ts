@@ -23,7 +23,7 @@ function pimlicoApiKey(): string {
 
 /** Build the Pimlico RPC URL for Sepolia. */
 function pimlicoUrl(): string {
-	return `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey()}`;
+	return `https://api.pimlico.io/v2/sepolia/rpc?apikey=${encodeURIComponent(pimlicoApiKey())}`;
 }
 
 class AccountState {
@@ -36,6 +36,10 @@ class AccountState {
 	/** Compute the counterfactual address and check if already deployed. */
 	async load(ownerAddress: `0x${string}`) {
 		this.error = null;
+		this.deploying = false;
+		this.deployTxHash = null;
+		this.smartAccountAddress = null;
+		this.deployed = false;
 
 		try {
 			const address = await publicClient.readContract({
@@ -58,9 +62,8 @@ class AccountState {
 	/** Deploy the smart account by sending a no-op UserOp (first UserOp auto-includes initCode). */
 	async deploy() {
 		const walletClient = wallet.client;
-		const walletAddress = wallet.address;
 
-		if (!walletClient || !walletAddress) {
+		if (!walletClient || !wallet.address) {
 			this.error = 'Wallet not connected';
 			return;
 		}
