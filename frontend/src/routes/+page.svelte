@@ -1,12 +1,7 @@
 <script lang="ts">
 	import { wallet } from '$lib/wallet.svelte';
 	import { account } from '$lib/account.svelte';
-	import { etherscanAddress } from '$lib/indexer.svelte';
-
-	function truncate(hex: string, head = 6, tail = 4): string {
-		if (hex.length <= head + tail + 1) return hex;
-		return hex.slice(0, head) + '\u2026' + hex.slice(-tail);
-	}
+	import { etherscanAddress, truncateHex } from '$lib/explorer';
 
 	$effect(() => {
 		if (wallet.address && wallet.correctChain) {
@@ -47,7 +42,7 @@
 									rel="noopener noreferrer"
 									class="text-indigo-400 hover:text-indigo-300"
 								>
-									{truncate(account.smartAccountAddress)}
+									{truncateHex(account.smartAccountAddress)}
 								</a>
 							</dd>
 						</div>
@@ -77,7 +72,7 @@
 									rel="noopener noreferrer"
 									class="text-indigo-400 hover:text-indigo-300"
 								>
-									{truncate(account.deployTxHash)}
+									{truncateHex(account.deployTxHash)}
 								</a>
 							</dd>
 						</div>
