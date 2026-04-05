@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/public';
-import { http } from 'viem';
+import { http, isAddress } from 'viem';
 import { sepolia } from 'viem/chains';
 import { createPaymasterClient, entryPoint07Address } from 'viem/account-abstraction';
 import { toSimpleSmartAccount } from 'permissionless/accounts';
@@ -11,7 +11,8 @@ import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
 function factoryAddress(): `0x${string}` {
 	const addr = env.PUBLIC_FACTORY_ADDRESS;
 	if (!addr) throw new Error('PUBLIC_FACTORY_ADDRESS is not set');
-	return addr as `0x${string}`;
+	if (!isAddress(addr)) throw new Error(`PUBLIC_FACTORY_ADDRESS is not a valid address: ${addr}`);
+	return addr;
 }
 
 /** Resolve Pimlico API key lazily. */
@@ -35,6 +36,8 @@ class AccountState {
 
 	/** Monotonically increasing ID to discard results from stale load() calls. */
 	private loadId = 0;
+	/** Monotonically increasing ID to discard results from stale deploy() calls. */
+	private deployId = 0;
 
 	/** Compute the counterfactual address and check if already deployed. */
 	async load(ownerAddress: `0x${string}`) {
@@ -72,6 +75,8 @@ class AccountState {
 
 	/** Deploy the smart account by sending a no-op UserOp (first UserOp auto-includes initCode). */
 	async deploy() {
+		if (this.deploying) return;
+
 		const walletClient = wallet.client;
 
 		if (!walletClient || !wallet.address) {
@@ -89,6 +94,7 @@ class AccountState {
 			return;
 		}
 
+		const id = ++this.deployId;
 		this.deploying = true;
 		this.error = null;
 		this.deployUserOpHash = null;
@@ -104,6 +110,8 @@ class AccountState {
 					version: '0.7'
 				}
 			});
+
+			if (id !== this.deployId) return;
 
 			const paymaster = createPaymasterClient({
 				transport: http(pimlicoUrl())
@@ -121,10 +129,14 @@ class AccountState {
 				calls: [{ to: this.smartAccountAddress, value: 0n, data: '0x' }]
 			});
 
+			if (id !== this.deployId) return;
+
 			this.deployUserOpHash = hash;
 
 			// Wait for the UserOp to be included on-chain.
 			const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
+
+			if (id !== this.deployId) return;
 
 			if (!receipt.success) {
 				this.error = 'UserOperation reverted on-chain';
@@ -134,22 +146,27 @@ class AccountState {
 
 			// Verify deployment by checking bytecode.
 			const code = await publicClient.getCode({ address: this.smartAccountAddress });
+
+			if (id !== this.deployId) return;
+
 			this.deployed = !!code && code !== '0x';
 
 			if (!this.deployed) {
 				this.error = 'Deployment transaction succeeded but no bytecode found';
 			}
 		} catch (e: unknown) {
+			if (id !== this.deployId) return;
 			const err = e as { shortMessage?: string; message?: string };
 			this.error = err.shortMessage ?? err.message ?? 'Deployment failed';
 		} finally {
-			this.deploying = false;
+			if (id === this.deployId) this.deploying = false;
 		}
 	}
 
 	/** Clear all state (called on wallet disconnect). */
 	reset() {
 		++this.loadId;
+		++this.deployId;
 		this.smartAccountAddress = null;
 		this.deployed = false;
 		this.deploying = false;
