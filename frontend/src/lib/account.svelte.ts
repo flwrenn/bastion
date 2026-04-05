@@ -1,0 +1,146 @@
+import { env } from '$env/dynamic/public';
+import { http } from 'viem';
+import { sepolia } from 'viem/chains';
+import { createPaymasterClient, entryPoint07Address } from 'viem/account-abstraction';
+import { toSimpleSmartAccount } from 'permissionless/accounts';
+import { createSmartAccountClient } from 'permissionless';
+import { publicClient, wallet } from '$lib/wallet.svelte';
+import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
+
+/** Resolve factory address lazily so $env/dynamic/public is read at call time. */
+function factoryAddress(): `0x${string}` {
+	const addr = env.PUBLIC_FACTORY_ADDRESS;
+	if (!addr) throw new Error('PUBLIC_FACTORY_ADDRESS is not set');
+	return addr as `0x${string}`;
+}
+
+/** Resolve Pimlico API key lazily. */
+function pimlicoApiKey(): string {
+	const key = env.PUBLIC_PIMLICO_API_KEY;
+	if (!key) throw new Error('PUBLIC_PIMLICO_API_KEY is not set');
+	return key;
+}
+
+/** Build the Pimlico RPC URL for Sepolia. */
+function pimlicoUrl(): string {
+	return `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey()}`;
+}
+
+class AccountState {
+	smartAccountAddress = $state<`0x${string}` | null>(null);
+	deployed = $state<boolean>(false);
+	deploying = $state<boolean>(false);
+	deployTxHash = $state<`0x${string}` | null>(null);
+	error = $state<string | null>(null);
+
+	/** Compute the counterfactual address and check if already deployed. */
+	async load(ownerAddress: `0x${string}`) {
+		this.error = null;
+
+		try {
+			const address = await publicClient.readContract({
+				address: factoryAddress(),
+				abi: SmartAccountFactoryAbi,
+				functionName: 'getAddress',
+				args: [ownerAddress, 0n]
+			});
+
+			this.smartAccountAddress = address;
+
+			const code = await publicClient.getCode({ address });
+			this.deployed = !!code && code !== '0x';
+		} catch (e: unknown) {
+			const err = e as { shortMessage?: string; message?: string };
+			this.error = err.shortMessage ?? err.message ?? 'Failed to load smart account';
+		}
+	}
+
+	/** Deploy the smart account by sending a no-op UserOp (first UserOp auto-includes initCode). */
+	async deploy() {
+		const walletClient = wallet.client;
+		const walletAddress = wallet.address;
+
+		if (!walletClient || !walletAddress) {
+			this.error = 'Wallet not connected';
+			return;
+		}
+
+		if (this.deployed) {
+			this.error = 'Account already deployed';
+			return;
+		}
+
+		if (!this.smartAccountAddress) {
+			this.error = 'Load account address first';
+			return;
+		}
+
+		this.deploying = true;
+		this.error = null;
+		this.deployTxHash = null;
+
+		try {
+			const smartAccount = await toSimpleSmartAccount({
+				client: publicClient,
+				owner: walletClient,
+				factoryAddress: factoryAddress(),
+				index: 0n,
+				entryPoint: {
+					address: entryPoint07Address,
+					version: '0.7'
+				}
+			});
+
+			const paymaster = createPaymasterClient({
+				transport: http(pimlicoUrl())
+			});
+
+			const bundlerClient = createSmartAccountClient({
+				account: smartAccount,
+				paymaster,
+				chain: sepolia,
+				bundlerTransport: http(pimlicoUrl())
+			});
+
+			// Send a no-op call to self — the first UserOp auto-deploys via initCode.
+			const hash = await bundlerClient.sendUserOperation({
+				calls: [{ to: this.smartAccountAddress, value: 0n, data: '0x' }]
+			});
+
+			this.deployTxHash = hash;
+
+			// Wait for the UserOp to be included on-chain.
+			const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
+
+			if (!receipt.success) {
+				this.error = 'UserOperation reverted on-chain';
+				this.deploying = false;
+				return;
+			}
+
+			// Verify deployment by checking bytecode.
+			const code = await publicClient.getCode({ address: this.smartAccountAddress });
+			this.deployed = !!code && code !== '0x';
+
+			if (!this.deployed) {
+				this.error = 'Deployment transaction succeeded but no bytecode found';
+			}
+		} catch (e: unknown) {
+			const err = e as { shortMessage?: string; message?: string };
+			this.error = err.shortMessage ?? err.message ?? 'Deployment failed';
+		} finally {
+			this.deploying = false;
+		}
+	}
+
+	/** Clear all state (called on wallet disconnect). */
+	reset() {
+		this.smartAccountAddress = null;
+		this.deployed = false;
+		this.deploying = false;
+		this.deployTxHash = null;
+		this.error = null;
+	}
+}
+
+export const account = new AccountState();

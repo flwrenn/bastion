@@ -1,4 +1,13 @@
-import { createPublicClient, createWalletClient, custom, http, type WalletClient } from 'viem';
+import {
+	createPublicClient,
+	createWalletClient,
+	custom,
+	http,
+	type Account,
+	type Chain,
+	type Transport,
+	type WalletClient
+} from 'viem';
 import { sepolia } from 'viem/chains';
 
 const SEPOLIA_CHAIN_ID = sepolia.id;
@@ -11,7 +20,7 @@ export const publicClient = createPublicClient({
 class WalletState {
 	address = $state<`0x${string}` | null>(null);
 	chainId = $state<number | null>(null);
-	client = $state<WalletClient | null>(null);
+	client = $state<WalletClient<Transport, Chain, Account> | null>(null);
 	error = $state<string | null>(null);
 
 	get connected() {
