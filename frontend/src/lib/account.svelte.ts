@@ -30,14 +30,19 @@ class AccountState {
 	smartAccountAddress = $state<`0x${string}` | null>(null);
 	deployed = $state<boolean>(false);
 	deploying = $state<boolean>(false);
-	deployTxHash = $state<`0x${string}` | null>(null);
+	deployUserOpHash = $state<`0x${string}` | null>(null);
 	error = $state<string | null>(null);
+
+	/** Monotonically increasing ID to discard results from stale load() calls. */
+	private loadId = 0;
 
 	/** Compute the counterfactual address and check if already deployed. */
 	async load(ownerAddress: `0x${string}`) {
+		const id = ++this.loadId;
+
 		this.error = null;
 		this.deploying = false;
-		this.deployTxHash = null;
+		this.deployUserOpHash = null;
 		this.smartAccountAddress = null;
 		this.deployed = false;
 
@@ -49,11 +54,17 @@ class AccountState {
 				args: [ownerAddress, 0n]
 			});
 
+			if (id !== this.loadId) return;
+
 			this.smartAccountAddress = address;
 
 			const code = await publicClient.getCode({ address });
+
+			if (id !== this.loadId) return;
+
 			this.deployed = !!code && code !== '0x';
 		} catch (e: unknown) {
+			if (id !== this.loadId) return;
 			const err = e as { shortMessage?: string; message?: string };
 			this.error = err.shortMessage ?? err.message ?? 'Failed to load smart account';
 		}
@@ -80,7 +91,7 @@ class AccountState {
 
 		this.deploying = true;
 		this.error = null;
-		this.deployTxHash = null;
+		this.deployUserOpHash = null;
 
 		try {
 			const smartAccount = await toSimpleSmartAccount({
@@ -110,7 +121,7 @@ class AccountState {
 				calls: [{ to: this.smartAccountAddress, value: 0n, data: '0x' }]
 			});
 
-			this.deployTxHash = hash;
+			this.deployUserOpHash = hash;
 
 			// Wait for the UserOp to be included on-chain.
 			const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
@@ -138,10 +149,11 @@ class AccountState {
 
 	/** Clear all state (called on wallet disconnect). */
 	reset() {
+		++this.loadId;
 		this.smartAccountAddress = null;
 		this.deployed = false;
 		this.deploying = false;
-		this.deployTxHash = null;
+		this.deployUserOpHash = null;
 		this.error = null;
 	}
 }
