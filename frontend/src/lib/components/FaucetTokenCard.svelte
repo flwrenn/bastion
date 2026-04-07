@@ -164,6 +164,7 @@
 	{/if}
 
 	<button
+		type="button"
 		onclick={claim}
 		disabled={claiming}
 		class="mt-4 w-full cursor-pointer rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
