@@ -5,7 +5,7 @@
  * sends the UserOp, and waits for the on-chain receipt.
  */
 
-import type { Account, Chain, Transport, WalletClient } from 'viem';
+import type { Account, Chain, Hex, Transport, WalletClient } from 'viem';
 import { http } from 'viem';
 import { sepolia } from 'viem/chains';
 import { createPaymasterClient } from 'viem/account-abstraction';
@@ -26,19 +26,11 @@ export type UserOpResult = {
 	success: boolean;
 };
 
-/**
- * Send a UserOperation with one or more calls via the owner's SmartAccount.
- *
- * @param owner       Connected wallet client (signs the UserOp).
- * @param accountAddress  Deployed SmartAccount address.
- * @param calls       One or more calls to execute.
- * @returns           The UserOp hash, on-chain tx hash, and whether it succeeded.
- */
-export async function sendUserOp(
+/** Create a SmartAccountClient (bundler + paymaster) for the given owner. */
+async function createBundlerClient(
 	owner: WalletClient<Transport, Chain, Account>,
-	accountAddress: `0x${string}`,
-	calls: UserOpCall[]
-): Promise<UserOpResult> {
+	accountAddress: `0x${string}`
+) {
 	const smartAccount = await toBastionSmartAccount({
 		client: publicClient,
 		owner,
@@ -52,14 +44,58 @@ export async function sendUserOp(
 		transport: http(pimlico)
 	});
 
-	const bundlerClient = createSmartAccountClient({
+	return createSmartAccountClient({
 		account: smartAccount,
 		paymaster,
 		chain: sepolia,
 		bundlerTransport: http(pimlico)
 	});
+}
+
+/**
+ * Send a UserOperation with one or more calls via the owner's SmartAccount.
+ * Calls are encoded via `execute` / `executeBatch`.
+ *
+ * @param owner           Connected wallet client (signs the UserOp).
+ * @param accountAddress  Deployed SmartAccount address.
+ * @param calls           One or more calls to execute.
+ * @returns               The UserOp hash, on-chain tx hash, and whether it succeeded.
+ */
+export async function sendUserOp(
+	owner: WalletClient<Transport, Chain, Account>,
+	accountAddress: `0x${string}`,
+	calls: UserOpCall[]
+): Promise<UserOpResult> {
+	const bundlerClient = await createBundlerClient(owner, accountAddress);
 
 	const hash = await bundlerClient.sendUserOperation({ calls });
+	const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
+
+	return {
+		userOpHash: hash,
+		txHash: receipt.receipt.transactionHash,
+		success: receipt.success
+	};
+}
+
+/**
+ * Send a UserOperation with raw callData (bypasses `execute` encoding).
+ * Use this for SmartAccount self-calls like `registerSessionKey` / `revokeSessionKey`
+ * where the EntryPoint must call the function directly.
+ *
+ * @param owner           Connected wallet client (signs the UserOp).
+ * @param accountAddress  Deployed SmartAccount address.
+ * @param callData        Pre-encoded callData for the UserOp.
+ * @returns               The UserOp hash, on-chain tx hash, and whether it succeeded.
+ */
+export async function sendRawUserOp(
+	owner: WalletClient<Transport, Chain, Account>,
+	accountAddress: `0x${string}`,
+	callData: Hex
+): Promise<UserOpResult> {
+	const bundlerClient = await createBundlerClient(owner, accountAddress);
+
+	const hash = await bundlerClient.sendUserOperation({ callData });
 	const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
 
 	return {
