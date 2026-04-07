@@ -2,6 +2,8 @@
 	import { wallet } from '$lib/wallet.svelte';
 	import { account } from '$lib/account.svelte';
 	import { etherscanAddress, truncateHex } from '$lib/explorer';
+	import CounterCard from '$lib/components/CounterCard.svelte';
+	import FaucetTokenCard from '$lib/components/FaucetTokenCard.svelte';
 
 	$effect(() => {
 		if (wallet.address && wallet.correctChain) {
@@ -96,6 +98,14 @@
 					</button>
 				{/if}
 			</div>
+
+			{#if account.deployed && account.smartAccountAddress}
+				<h2 class="mt-8 mb-4 text-xl font-bold">Interact</h2>
+				<div class="space-y-4">
+					<CounterCard accountAddress={account.smartAccountAddress} />
+					<FaucetTokenCard accountAddress={account.smartAccountAddress} />
+				</div>
+			{/if}
 		{/if}
 	{:else}
 		<div class="py-24 text-center">

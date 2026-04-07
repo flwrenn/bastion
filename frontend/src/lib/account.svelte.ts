@@ -1,31 +1,11 @@
-import { env } from '$env/dynamic/public';
-import { http, isAddress } from 'viem';
+import { http } from 'viem';
 import { sepolia } from 'viem/chains';
 import { createPaymasterClient } from 'viem/account-abstraction';
 import { createSmartAccountClient } from 'permissionless';
 import { publicClient, wallet } from '$lib/wallet.svelte';
 import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
 import { toBastionSmartAccount } from '$lib/smartAccount';
-
-/** Resolve factory address lazily so $env/dynamic/public is read at call time. */
-function factoryAddress(): `0x${string}` {
-	const addr = env.PUBLIC_FACTORY_ADDRESS;
-	if (!addr) throw new Error('PUBLIC_FACTORY_ADDRESS is not set');
-	if (!isAddress(addr)) throw new Error(`PUBLIC_FACTORY_ADDRESS is not a valid address: ${addr}`);
-	return addr;
-}
-
-/** Resolve Pimlico API key lazily. */
-function pimlicoApiKey(): string {
-	const key = env.PUBLIC_PIMLICO_API_KEY;
-	if (!key) throw new Error('PUBLIC_PIMLICO_API_KEY is not set');
-	return key;
-}
-
-/** Build the Pimlico RPC URL for Sepolia. */
-function pimlicoUrl(): string {
-	return `https://api.pimlico.io/v2/sepolia/rpc?apikey=${encodeURIComponent(pimlicoApiKey())}`;
-}
+import { factoryAddress, pimlicoUrl } from '$lib/config';
 
 class AccountState {
 	smartAccountAddress = $state<`0x${string}` | null>(null);
@@ -111,15 +91,17 @@ class AccountState {
 
 			if (id !== this.deployId) return;
 
+			const pimlico = pimlicoUrl();
+
 			const paymaster = createPaymasterClient({
-				transport: http(pimlicoUrl())
+				transport: http(pimlico)
 			});
 
 			const bundlerClient = createSmartAccountClient({
 				account: smartAccount,
 				paymaster,
 				chain: sepolia,
-				bundlerTransport: http(pimlicoUrl())
+				bundlerTransport: http(pimlico)
 			});
 
 			// Send a no-op call to self — the first UserOp auto-deploys via initCode.
