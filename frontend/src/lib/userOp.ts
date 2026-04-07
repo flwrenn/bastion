@@ -22,6 +22,7 @@ export type UserOpCall = {
 
 export type UserOpResult = {
 	userOpHash: `0x${string}`;
+	txHash: `0x${string}`;
 	success: boolean;
 };
 
@@ -31,7 +32,7 @@ export type UserOpResult = {
  * @param owner       Connected wallet client (signs the UserOp).
  * @param accountAddress  Deployed SmartAccount address.
  * @param calls       One or more calls to execute.
- * @returns           The UserOp hash and whether it succeeded on-chain.
+ * @returns           The UserOp hash, on-chain tx hash, and whether it succeeded.
  */
 export async function sendUserOp(
 	owner: WalletClient<Transport, Chain, Account>,
@@ -61,5 +62,9 @@ export async function sendUserOp(
 	const hash = await bundlerClient.sendUserOperation({ calls });
 	const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
 
-	return { userOpHash: hash, success: receipt.success };
+	return {
+		userOpHash: hash,
+		txHash: receipt.receipt.transactionHash,
+		success: receipt.success
+	};
 }

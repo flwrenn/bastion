@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { encodeFunctionData, formatUnits } from 'viem';
+	import { encodeFunctionData } from 'viem';
 	import { publicClient, wallet } from '$lib/wallet.svelte';
 	import { CounterAbi } from '$lib/contracts/Counter';
 	import { counterAddress } from '$lib/config';
 	import { sendUserOp } from '$lib/userOp';
-	import { etherscanTx } from '$lib/explorer';
+	import { etherscanTx, truncateHex } from '$lib/explorer';
 
 	let { accountAddress }: { accountAddress: `0x${string}` } = $props();
 
@@ -12,7 +12,8 @@
 	let loading = $state(false);
 	let sending = $state(false);
 	let error = $state<string | null>(null);
-	let lastOpHash = $state<`0x${string}` | null>(null);
+	let lastUserOpHash = $state<`0x${string}` | null>(null);
+	let lastTxHash = $state<`0x${string}` | null>(null);
 
 	async function loadCount() {
 		loading = true;
@@ -41,7 +42,8 @@
 
 		sending = true;
 		error = null;
-		lastOpHash = null;
+		lastUserOpHash = null;
+		lastTxHash = null;
 
 		try {
 			const result = await sendUserOp(walletClient, accountAddress, [
@@ -54,7 +56,8 @@
 				}
 			]);
 
-			lastOpHash = result.userOpHash;
+			lastUserOpHash = result.userOpHash;
+			lastTxHash = result.txHash;
 
 			if (!result.success) {
 				error = 'UserOperation reverted on-chain';
@@ -95,18 +98,35 @@
 		</div>
 	</dl>
 
-	{#if lastOpHash}
-		<p class="mt-3 text-xs text-zinc-500">
-			Last op:
-			<a
-				href={etherscanTx(lastOpHash)}
-				target="_blank"
-				rel="noopener noreferrer"
-				class="text-indigo-400 hover:text-indigo-300"
-			>
-				{lastOpHash.slice(0, 10)}…{lastOpHash.slice(-6)}
-			</a>
-		</p>
+	{#if lastUserOpHash || lastTxHash}
+		<div class="mt-3 space-y-1 text-xs text-zinc-500">
+			{#if lastUserOpHash}
+				<p>
+					UserOp:
+					<a
+						href="https://jiffyscan.xyz/userOpHash/{lastUserOpHash}?network=sepolia"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-indigo-400 hover:text-indigo-300"
+					>
+						{truncateHex(lastUserOpHash)}
+					</a>
+				</p>
+			{/if}
+			{#if lastTxHash}
+				<p>
+					Tx:
+					<a
+						href={etherscanTx(lastTxHash)}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-indigo-400 hover:text-indigo-300"
+					>
+						{truncateHex(lastTxHash)}
+					</a>
+				</p>
+			{/if}
+		</div>
 	{/if}
 
 	{#if error}
