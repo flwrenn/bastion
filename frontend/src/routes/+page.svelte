@@ -4,6 +4,7 @@
 	import { etherscanAddress, truncateHex } from '$lib/explorer';
 	import CounterCard from '$lib/components/CounterCard.svelte';
 	import FaucetTokenCard from '$lib/components/FaucetTokenCard.svelte';
+	import SessionKeyManager from '$lib/components/SessionKeyManager.svelte';
 
 	$effect(() => {
 		if (wallet.address && wallet.correctChain) {
@@ -105,6 +106,9 @@
 					<CounterCard accountAddress={account.smartAccountAddress} />
 					<FaucetTokenCard accountAddress={account.smartAccountAddress} />
 				</div>
+
+				<h2 class="mt-8 mb-4 text-xl font-bold">Session Keys</h2>
+				<SessionKeyManager accountAddress={account.smartAccountAddress} />
 			{/if}
 		{/if}
 	{:else}
