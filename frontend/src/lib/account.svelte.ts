@@ -1,11 +1,11 @@
 import { env } from '$env/dynamic/public';
 import { http, isAddress } from 'viem';
 import { sepolia } from 'viem/chains';
-import { createPaymasterClient, entryPoint07Address } from 'viem/account-abstraction';
-import { toSimpleSmartAccount } from 'permissionless/accounts';
+import { createPaymasterClient } from 'viem/account-abstraction';
 import { createSmartAccountClient } from 'permissionless';
 import { publicClient, wallet } from '$lib/wallet.svelte';
 import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
+import { toBastionSmartAccount } from '$lib/smartAccount';
 
 /** Resolve factory address lazily so $env/dynamic/public is read at call time. */
 function factoryAddress(): `0x${string}` {
@@ -89,7 +89,8 @@ class AccountState {
 			return;
 		}
 
-		if (!this.smartAccountAddress) {
+		const accountAddr = this.smartAccountAddress;
+		if (!accountAddr) {
 			this.error = 'Load account address first';
 			return;
 		}
@@ -100,15 +101,12 @@ class AccountState {
 		this.deployUserOpHash = null;
 
 		try {
-			const smartAccount = await toSimpleSmartAccount({
+			const smartAccount = await toBastionSmartAccount({
 				client: publicClient,
 				owner: walletClient,
 				factoryAddress: factoryAddress(),
-				index: 0n,
-				entryPoint: {
-					address: entryPoint07Address,
-					version: '0.7'
-				}
+				salt: 0n,
+				accountAddress: accountAddr
 			});
 
 			if (id !== this.deployId) return;
@@ -126,7 +124,7 @@ class AccountState {
 
 			// Send a no-op call to self — the first UserOp auto-deploys via initCode.
 			const hash = await bundlerClient.sendUserOperation({
-				calls: [{ to: this.smartAccountAddress, value: 0n, data: '0x' }]
+				calls: [{ to: accountAddr, value: 0n, data: '0x' }]
 			});
 
 			if (id !== this.deployId) return;
@@ -145,7 +143,7 @@ class AccountState {
 			}
 
 			// Verify deployment by checking bytecode.
-			const code = await publicClient.getCode({ address: this.smartAccountAddress });
+			const code = await publicClient.getCode({ address: accountAddr });
 
 			if (id !== this.deployId) return;
 
