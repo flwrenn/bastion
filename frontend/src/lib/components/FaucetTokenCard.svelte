@@ -4,7 +4,7 @@
 	import { FaucetTokenAbi } from '$lib/contracts/FaucetToken';
 	import { faucetTokenAddress } from '$lib/config';
 	import { sendUserOp } from '$lib/userOp';
-	import { etherscanTx } from '$lib/explorer';
+	import { etherscanTx, truncateHex } from '$lib/explorer';
 
 	let { accountAddress }: { accountAddress: `0x${string}` } = $props();
 
@@ -14,7 +14,8 @@
 	let loading = $state(false);
 	let claiming = $state(false);
 	let error = $state<string | null>(null);
-	let lastOpHash = $state<`0x${string}` | null>(null);
+	let lastUserOpHash = $state<`0x${string}` | null>(null);
+	let lastTxHash = $state<`0x${string}` | null>(null);
 
 	async function loadBalance() {
 		loading = true;
@@ -61,7 +62,8 @@
 
 		claiming = true;
 		error = null;
-		lastOpHash = null;
+		lastUserOpHash = null;
+		lastTxHash = null;
 
 		try {
 			const result = await sendUserOp(walletClient, accountAddress, [
@@ -74,7 +76,8 @@
 				}
 			]);
 
-			lastOpHash = result.userOpHash;
+			lastUserOpHash = result.userOpHash;
+			lastTxHash = result.txHash;
 
 			if (!result.success) {
 				error = 'UserOperation reverted on-chain';
@@ -90,11 +93,14 @@
 		}
 	}
 
+	/** Format a token balance string-based to avoid Number precision loss. */
 	function formatBalance(raw: bigint, dec: number): string {
-		const formatted = formatUnits(raw, dec);
-		// Drop unnecessary trailing decimals but keep at least 2.
-		const num = Number(formatted);
-		return num % 1 === 0 ? num.toFixed(0) : num.toFixed(2);
+		const str = formatUnits(raw, dec);
+		const dot = str.indexOf('.');
+		if (dot === -1) return str;
+		// Keep up to 2 decimal places, strip trailing zeros.
+		const trimmed = str.slice(0, dot + 3).replace(/\.?0+$/, '');
+		return trimmed || '0';
 	}
 
 	$effect(() => {
@@ -122,18 +128,35 @@
 		</div>
 	</dl>
 
-	{#if lastOpHash}
-		<p class="mt-3 text-xs text-zinc-500">
-			Last op:
-			<a
-				href={etherscanTx(lastOpHash)}
-				target="_blank"
-				rel="noopener noreferrer"
-				class="text-indigo-400 hover:text-indigo-300"
-			>
-				{lastOpHash.slice(0, 10)}…{lastOpHash.slice(-6)}
-			</a>
-		</p>
+	{#if lastUserOpHash || lastTxHash}
+		<div class="mt-3 space-y-1 text-xs text-zinc-500">
+			{#if lastUserOpHash}
+				<p>
+					UserOp:
+					<a
+						href="https://jiffyscan.xyz/userOpHash/{lastUserOpHash}?network=sepolia"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-indigo-400 hover:text-indigo-300"
+					>
+						{truncateHex(lastUserOpHash)}
+					</a>
+				</p>
+			{/if}
+			{#if lastTxHash}
+				<p>
+					Tx:
+					<a
+						href={etherscanTx(lastTxHash)}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="text-indigo-400 hover:text-indigo-300"
+					>
+						{truncateHex(lastTxHash)}
+					</a>
+				</p>
+			{/if}
+		</div>
 	{/if}
 
 	{#if error}
