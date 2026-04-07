@@ -58,7 +58,7 @@ export async function toBastionSmartAccount(
 	let resolvedChainId: number | undefined;
 
 	const getResolvedChainId = async (): Promise<number> => {
-		if (resolvedChainId) return resolvedChainId;
+		if (resolvedChainId !== undefined) return resolvedChainId;
 		resolvedChainId = client.chain?.id ?? (await getChainId(client));
 		return resolvedChainId;
 	};
