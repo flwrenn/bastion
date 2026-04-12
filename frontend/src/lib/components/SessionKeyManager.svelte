@@ -327,6 +327,9 @@
 	{#if keys.length > 0}
 		<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 p-6">
 			<h3 class="text-lg font-semibold">Registered Keys</h3>
+			<p class="mt-1 text-xs text-zinc-500">
+				Keys shown are from this session only. Refreshing the page will clear this list.
+			</p>
 
 			<div class="mt-4 space-y-3">
 				{#each keys as entry, i}
