@@ -182,6 +182,7 @@ class IndexerFeed {
 				return;
 			}
 			this.pollFailures = 0;
+			this.startStatsRefresh(); // REST is alive — restart stats if stopped.
 			const body: { data: UserOperation[] } = await res.json();
 			// REST returns newest first; reverse so addOperation prepends correctly.
 			for (const op of body.data.reverse()) {
