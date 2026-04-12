@@ -118,14 +118,14 @@ export async function sendRawUserOp(
  * @param sessionKey      Local account holding the session key private key.
  * @param ownerAddress    Owner of the SmartAccount (needed for factory args).
  * @param accountAddress  Deployed SmartAccount address.
- * @param calls           One or more calls to execute.
+ * @param call            Single call to execute (session key validation requires `execute`, not `executeBatch`).
  * @returns               The UserOp hash, on-chain tx hash, and whether it succeeded.
  */
 export async function sendSessionKeyUserOp(
 	sessionKey: LocalAccount,
 	ownerAddress: Address,
 	accountAddress: Address,
-	calls: UserOpCall[]
+	call: UserOpCall
 ): Promise<UserOpResult> {
 	const smartAccount = await toSessionKeySmartAccount({
 		client: publicClient,
@@ -137,7 +137,7 @@ export async function sendSessionKeyUserOp(
 
 	const bundlerClient = await createBundlerClientFor(smartAccount);
 
-	const hash = await bundlerClient.sendUserOperation({ calls });
+	const hash = await bundlerClient.sendUserOperation({ calls: [call] });
 	const receipt = await bundlerClient.waitForUserOperationReceipt({ hash });
 
 	return {
