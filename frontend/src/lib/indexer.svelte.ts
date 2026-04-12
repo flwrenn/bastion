@@ -240,10 +240,17 @@ class IndexerFeed {
 		const signal = this.abort?.signal;
 		try {
 			const res = await fetch(indexerUrl() + '/api/stats', { signal });
-			if (!res.ok) return;
+			if (!res.ok) {
+				this.stats = null;
+				return;
+			}
 			this.stats = (await res.json()) as IndexerStats;
 		} catch {
-			// Silently ignore — stats are non-critical.
+			// Null out on real failures so the UI shows em-dashes;
+			// ignore AbortError from disconnect().
+			if (!signal?.aborted) {
+				this.stats = null;
+			}
 		}
 	}
 
