@@ -1,12 +1,16 @@
 <script lang="ts">
-	import { isAddress, encodeFunctionData, type Hex } from 'viem';
+	import { onDestroy } from 'svelte';
+	import { isAddress, type Hex } from 'viem';
 	import { privateKeyToAccount } from 'viem/accounts';
 	import { publicClient } from '$lib/wallet.svelte';
 	import { SmartAccountAbi } from '$lib/contracts/SmartAccount';
 	import { sendSessionKeyUserOp } from '$lib/userOp';
 	import { etherscanTx, truncateHex } from '$lib/explorer';
 
-	// ── Known selectors (for display) ───────────────────────────────────
+	// ── Known selectors ─────────────────────────────────────────────────
+
+	/** Selectors that take no arguments — safe to execute with just the 4-byte selector. */
+	const NO_ARG_SELECTORS = new Set(['0xd09de08a', '0x4e71d92d']);
 
 	const SELECTOR_LABELS: Record<string, string> = {
 		'0xd09de08a': 'increment()',
@@ -41,18 +45,27 @@
 	let lastUserOpHash = $state<`0x${string}` | null>(null);
 	let lastTxHash = $state<`0x${string}` | null>(null);
 
+	// ── Live clock for expiry tracking ──────────────────────────────────
+
+	let now = $state(Date.now() / 1000);
+	const timer = setInterval(() => (now = Date.now() / 1000), 1000);
+	onDestroy(() => clearInterval(timer));
+
 	// ── Derived ─────────────────────────────────────────────────────────
 
 	const isActive = $derived(
 		keyInfo !== null &&
 			keyInfo.validUntil > 0 &&
-			Date.now() / 1000 >= keyInfo.validAfter &&
-			Date.now() / 1000 < keyInfo.validUntil
+			now >= keyInfo.validAfter &&
+			now < keyInfo.validUntil
 	);
 
 	const selectorLabel = $derived(
 		keyInfo ? (SELECTOR_LABELS[keyInfo.allowedSelector] ?? keyInfo.allowedSelector) : ''
 	);
+
+	/** Whether the allowed function can be executed (no-arg selectors only). */
+	const canExecute = $derived(keyInfo !== null && NO_ARG_SELECTORS.has(keyInfo.allowedSelector));
 
 	// ── Load session key from contract ──────────────────────────────────
 
@@ -77,7 +90,6 @@
 		try {
 			const account = privateKeyToAccount(privateKeyInput as `0x${string}`);
 
-			// Read session key data and owner in parallel.
 			const [skData, owner] = await Promise.all([
 				publicClient.readContract({
 					address: accountAddress as `0x${string}`,
@@ -118,7 +130,7 @@
 	// ── Execute allowed action ──────────────────────────────────────────
 
 	async function execute() {
-		if (!keyInfo || !ownerAddress) return;
+		if (!keyInfo || !ownerAddress || !canExecute) return;
 
 		const account = privateKeyToAccount(privateKeyInput as `0x${string}`);
 
@@ -128,22 +140,15 @@
 		lastTxHash = null;
 
 		try {
-			// Build the inner call data from the allowed selector.
-			// For no-arg functions (increment, claim), the selector IS the full calldata.
-			// For functions with args, this would need additional encoding.
-			const innerData: Hex = keyInfo.allowedSelector as Hex;
-
 			const result = await sendSessionKeyUserOp(
 				account,
 				ownerAddress,
 				accountAddress as `0x${string}`,
-				[
-					{
-						to: keyInfo.allowedTarget,
-						value: 0n,
-						data: innerData
-					}
-				]
+				{
+					to: keyInfo.allowedTarget,
+					value: 0n,
+					data: keyInfo.allowedSelector as Hex
+				}
 			);
 
 			lastUserOpHash = result.userOpHash;
@@ -288,16 +293,24 @@
 				<p class="mt-4 text-sm text-red-400">{sendError}</p>
 			{/if}
 
+			{#if !canExecute}
+				<p class="mt-4 text-sm text-yellow-400">
+					This function requires arguments — execution from this page is not supported.
+				</p>
+			{/if}
+
 			<button
 				type="button"
 				onclick={execute}
-				disabled={sending || !isActive}
+				disabled={sending || !isActive || !canExecute}
 				class="mt-4 w-full cursor-pointer rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{#if sending}
 					Sending UserOp…
 				{:else if !isActive}
 					Key Expired
+				{:else if !canExecute}
+					Requires Arguments
 				{:else}
 					Execute {selectorLabel}
 				{/if}
