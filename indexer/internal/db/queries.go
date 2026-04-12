@@ -169,7 +169,8 @@ type Stats struct {
 
 // zeroPaymaster is the 20-byte zero address used to identify self-funded
 // (non-sponsored) operations. Any other paymaster value is considered sponsored.
-// Fixed-size array prevents accidental mutation of the sentinel value.
+// Declared as a fixed-size array so each [:] call produces a fresh slice header
+// without risk of append or reslice changing the underlying length.
 var zeroPaymaster = [20]byte{}
 
 // GetStats returns aggregate statistics across all indexed operations.
