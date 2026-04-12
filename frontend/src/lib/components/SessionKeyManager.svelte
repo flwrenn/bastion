@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { encodeFunctionData, toFunctionSelector } from 'viem';
+	import { encodeFunctionData, isAddress, toFunctionSelector } from 'viem';
 	import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-	import { publicClient, wallet } from '$lib/wallet.svelte';
+	import { wallet } from '$lib/wallet.svelte';
 	import { SmartAccountAbi } from '$lib/contracts/SmartAccount';
 	import { counterAddress, faucetTokenAddress } from '$lib/config';
 	import { sendRawUserOp } from '$lib/userOp';
@@ -36,6 +36,8 @@
 
 	let keyAddress = $state('');
 	let generatedPrivateKey = $state<string | null>(null);
+	/** The address that was generated — used to detect manual edits. */
+	let generatedAddress = $state<string | null>(null);
 	let selectedTargetId = $state(TARGETS[0].id);
 	let selectedFnIndex = $state(0);
 	let validMinutes = $state(60);
@@ -43,6 +45,8 @@
 	let registerError = $state<string | null>(null);
 
 	// ── Registered keys ─────────────────────────────────────────────────
+	// NOTE: Keys are tracked in-memory only (the contract's sessionKeys mapping
+	// is not enumerable). Refreshing the page will clear this list.
 
 	type SessionKeyEntry = {
 		address: `0x${string}`;
@@ -51,6 +55,7 @@
 		functionName: string;
 		validAfter: number;
 		validUntil: number;
+		revoked: boolean;
 		revoking: boolean;
 	};
 
@@ -70,12 +75,21 @@
 		selectedFnIndex = 0;
 	});
 
+	// Clear generated private key if the user manually edits the address.
+	$effect(() => {
+		if (generatedAddress && keyAddress !== generatedAddress) {
+			generatedPrivateKey = null;
+			generatedAddress = null;
+		}
+	});
+
 	// ── Actions ─────────────────────────────────────────────────────────
 
 	function generateKey() {
 		const pk = generatePrivateKey();
 		const account = privateKeyToAccount(pk);
 		keyAddress = account.address;
+		generatedAddress = account.address;
 		generatedPrivateKey = pk;
 	}
 
@@ -85,8 +99,12 @@
 			registerError = 'Wallet not connected';
 			return;
 		}
-		if (!keyAddress || !keyAddress.startsWith('0x') || keyAddress.length !== 42) {
-			registerError = 'Enter a valid address or generate a key';
+		if (!isAddress(keyAddress)) {
+			registerError = 'Enter a valid Ethereum address or generate a key';
+			return;
+		}
+		if (!Number.isFinite(validMinutes) || validMinutes < 1) {
+			registerError = 'Duration must be at least 1 minute';
 			return;
 		}
 
@@ -95,7 +113,7 @@
 
 		const now = Math.floor(Date.now() / 1000);
 		const validAfter = now;
-		const validUntil = now + validMinutes * 60;
+		const validUntil = now + Math.floor(validMinutes) * 60;
 
 		try {
 			const callData = encodeFunctionData({
@@ -126,6 +144,7 @@
 					functionName: selectedFn.label,
 					validAfter,
 					validUntil,
+					revoked: false,
 					revoking: false
 				}
 			];
@@ -133,6 +152,7 @@
 			// Reset form.
 			keyAddress = '';
 			generatedPrivateKey = null;
+			generatedAddress = null;
 		} catch (e: unknown) {
 			const err = e as { shortMessage?: string; message?: string };
 			registerError = err.shortMessage ?? err.message ?? 'Registration failed';
@@ -146,7 +166,7 @@
 		if (!walletClient) return;
 
 		const entry = keys[index];
-		if (!entry) return;
+		if (!entry || entry.revoked) return;
 
 		keys[index].revoking = true;
 		revokeError = null;
@@ -166,7 +186,8 @@
 				return;
 			}
 
-			keys = keys.filter((_, i) => i !== index);
+			keys[index].revoked = true;
+			keys[index].revoking = false;
 		} catch (e: unknown) {
 			const err = e as { shortMessage?: string; message?: string };
 			revokeError = err.shortMessage ?? err.message ?? 'Revoke failed';
@@ -178,12 +199,26 @@
 		return new Date(unix * 1000).toLocaleString();
 	}
 
-	function isExpired(entry: SessionKeyEntry): boolean {
-		return Date.now() / 1000 > entry.validUntil;
+	function keyStatus(entry: SessionKeyEntry): { label: string; color: string } {
+		if (entry.revoked) return { label: 'Revoked', color: 'text-zinc-400' };
+		if (Date.now() / 1000 > entry.validUntil) return { label: 'Expired', color: 'text-red-400' };
+		return { label: 'Active', color: 'text-green-400' };
 	}
 
-	function copyToClipboard(text: string) {
-		navigator.clipboard.writeText(text);
+	async function copyToClipboard(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			// Fallback: select a temporary textarea (insecure context).
+			const el = document.createElement('textarea');
+			el.value = text;
+			el.style.position = 'fixed';
+			el.style.opacity = '0';
+			document.body.appendChild(el);
+			el.select();
+			document.execCommand('copy');
+			document.body.removeChild(el);
+		}
 	}
 </script>
 
@@ -295,7 +330,13 @@
 
 			<div class="mt-4 space-y-3">
 				{#each keys as entry, i}
-					<div class="rounded border border-zinc-700 p-3">
+					{@const status = keyStatus(entry)}
+					<div
+						class="rounded border p-3"
+						class:border-zinc-700={!entry.revoked}
+						class:border-zinc-800={entry.revoked}
+						class:opacity-60={entry.revoked}
+					>
 						<div class="flex items-start justify-between gap-2">
 							<div class="min-w-0 flex-1">
 								<p class="font-mono text-sm text-zinc-200">
@@ -306,13 +347,9 @@
 								</p>
 								<p class="mt-1 text-xs text-zinc-500">
 									{formatTime(entry.validAfter)} → {formatTime(entry.validUntil)}
-									{#if isExpired(entry)}
-										<span class="ml-1 text-red-400">Expired</span>
-									{:else}
-										<span class="ml-1 text-green-400">Active</span>
-									{/if}
+									<span class="ml-1 {status.color}">{status.label}</span>
 								</p>
-								{#if entry.privateKey}
+								{#if entry.privateKey && !entry.revoked}
 									<button
 										type="button"
 										onclick={() => copyToClipboard(entry.privateKey!)}
@@ -322,14 +359,16 @@
 									</button>
 								{/if}
 							</div>
-							<button
-								type="button"
-								onclick={() => revoke(i)}
-								disabled={entry.revoking}
-								class="cursor-pointer rounded bg-red-900/60 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-900/80 disabled:cursor-not-allowed disabled:opacity-50"
-							>
-								{entry.revoking ? 'Revoking…' : 'Revoke'}
-							</button>
+							{#if !entry.revoked}
+								<button
+									type="button"
+									onclick={() => revoke(i)}
+									disabled={entry.revoking}
+									class="cursor-pointer rounded bg-red-900/60 px-2.5 py-1 text-xs font-medium text-red-300 hover:bg-red-900/80 disabled:cursor-not-allowed disabled:opacity-50"
+								>
+									{entry.revoking ? 'Revoking…' : 'Revoke'}
+								</button>
+							{/if}
 						</div>
 					</div>
 				{/each}
