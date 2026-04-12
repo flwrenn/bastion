@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { isAddress, type Hex } from 'viem';
-	import { privateKeyToAccount } from 'viem/accounts';
+	import { type LocalAccount, privateKeyToAccount } from 'viem/accounts';
 	import { publicClient } from '$lib/wallet.svelte';
 	import { SmartAccountAbi } from '$lib/contracts/SmartAccount';
 	import { sendSessionKeyUserOp } from '$lib/userOp';
@@ -35,6 +35,8 @@
 
 	let keyInfo = $state<SessionKeyInfo | null>(null);
 	let ownerAddress = $state<`0x${string}` | null>(null);
+	/** LocalAccount derived at load time — reused for signing to prevent mismatch. */
+	let loadedAccount = $state<LocalAccount | null>(null);
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
 
@@ -90,6 +92,7 @@
 		loadError = null;
 		keyInfo = null;
 		ownerAddress = null;
+		loadedAccount = null;
 		lastUserOpHash = null;
 		lastTxHash = null;
 		sendError = null;
@@ -119,6 +122,7 @@
 			}
 
 			ownerAddress = owner;
+			loadedAccount = account;
 			keyInfo = {
 				address: account.address,
 				allowedTarget,
@@ -137,9 +141,7 @@
 	// ── Execute allowed action ──────────────────────────────────────────
 
 	async function execute() {
-		if (!keyInfo || !ownerAddress || !canExecute) return;
-
-		const account = privateKeyToAccount(privateKeyInput as `0x${string}`);
+		if (!keyInfo || !ownerAddress || !loadedAccount || !canExecute) return;
 
 		sending = true;
 		sendError = null;
@@ -148,7 +150,7 @@
 
 		try {
 			const result = await sendSessionKeyUserOp(
-				account,
+				loadedAccount,
 				ownerAddress,
 				accountAddress as `0x${string}`,
 				{
