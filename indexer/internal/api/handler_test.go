@@ -4,12 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
 )
+
+const floatEps = 1e-9
+
+func approxEqual(a, b float64) bool {
+	return math.Abs(a-b) < floatEps
+}
 
 func TestEncodeHex(t *testing.T) {
 	t.Parallel()
@@ -595,13 +602,11 @@ func TestGetStatsHappyPath(t *testing.T) {
 	if got.UniqueSenders != 10 {
 		t.Fatalf("uniqueSenders = %d, want 10", got.UniqueSenders)
 	}
-	wantSuccessRate := 0.75
-	if got.SuccessRate != wantSuccessRate {
-		t.Fatalf("successRate = %f, want %f", got.SuccessRate, wantSuccessRate)
+	if !approxEqual(got.SuccessRate, 0.75) {
+		t.Fatalf("successRate = %f, want ~0.75", got.SuccessRate)
 	}
-	wantSponsoredRate := 0.4
-	if got.SponsoredRate != wantSponsoredRate {
-		t.Fatalf("sponsoredRate = %f, want %f", got.SponsoredRate, wantSponsoredRate)
+	if !approxEqual(got.SponsoredRate, 0.4) {
+		t.Fatalf("sponsoredRate = %f, want ~0.4", got.SponsoredRate)
 	}
 }
 
@@ -626,13 +631,13 @@ func TestGetStatsZeroOps(t *testing.T) {
 	if got.TotalOps != 0 {
 		t.Fatalf("totalOps = %d, want 0", got.TotalOps)
 	}
-	if got.SuccessRate != 0 {
+	if !approxEqual(got.SuccessRate, 0) {
 		t.Fatalf("successRate = %f, want 0 (avoid division by zero)", got.SuccessRate)
 	}
 	if got.SponsoredCount != 0 {
 		t.Fatalf("sponsoredCount = %d, want 0", got.SponsoredCount)
 	}
-	if got.SponsoredRate != 0 {
+	if !approxEqual(got.SponsoredRate, 0) {
 		t.Fatalf("sponsoredRate = %f, want 0 (avoid division by zero)", got.SponsoredRate)
 	}
 }
