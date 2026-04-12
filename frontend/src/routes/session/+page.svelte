@@ -48,7 +48,7 @@
 	// ── Live clock for expiry tracking ──────────────────────────────────
 
 	let now = $state(Date.now() / 1000);
-	let timer: ReturnType<typeof setInterval>;
+	let timer: ReturnType<typeof setInterval> | undefined;
 	onMount(() => {
 		timer = setInterval(() => (now = Date.now() / 1000), 1000);
 	});
@@ -61,6 +61,10 @@
 			keyInfo.validUntil > 0 &&
 			now >= keyInfo.validAfter &&
 			now < keyInfo.validUntil
+	);
+
+	const isPending = $derived(
+		keyInfo !== null && keyInfo.validUntil > 0 && now < keyInfo.validAfter
 	);
 
 	const selectorLabel = $derived(
@@ -254,6 +258,8 @@
 					<dd>
 						{#if isActive}
 							<span class="text-green-400">Active</span>
+						{:else if isPending}
+							<span class="text-yellow-400">Not yet active</span>
 						{:else}
 							<span class="text-red-400">Expired</span>
 						{/if}
@@ -305,11 +311,13 @@
 			<button
 				type="button"
 				onclick={execute}
-				disabled={sending || !isActive || !canExecute}
+				disabled={sending || !isActive || isPending || !canExecute}
 				class="mt-4 w-full cursor-pointer rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
 			>
 				{#if sending}
 					Sending UserOp…
+				{:else if isPending}
+					Not Yet Active
 				{:else if !isActive}
 					Key Expired
 				{:else if !canExecute}
