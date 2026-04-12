@@ -1,12 +1,24 @@
 /**
- * Custom smart account adapter for the Bastion SmartAccount contract.
+ * Custom smart account adapters for the Bastion SmartAccount contract.
  *
- * Replaces permissionless.js's generic `toSimpleSmartAccount` with an adapter
- * built on viem's `toSmartAccount` that uses the project's own SmartAccount and
- * SmartAccountFactory ABIs for call encoding, factory initCode, and UserOp signing.
+ * Two variants:
+ * - `toBastionSmartAccount` — owner flow, signs via WalletClient (MetaMask)
+ * - `toSessionKeySmartAccount` — session key flow, signs via LocalAccount (private key)
+ *
+ * Both use the project's SmartAccount and SmartAccountFactory ABIs for call
+ * encoding, factory initCode, and UserOp signing against EntryPoint v0.7.
  */
 
-import type { Address, Chain, Client, Transport, WalletClient, Account } from 'viem';
+import type {
+	Address,
+	Chain,
+	Client,
+	Hex,
+	LocalAccount,
+	Transport,
+	WalletClient,
+	Account
+} from 'viem';
 import { encodeFunctionData } from 'viem';
 import {
 	type SmartAccount,
@@ -20,41 +32,27 @@ import { getChainId } from 'viem/actions';
 import { SmartAccountAbi } from '$lib/contracts/SmartAccount';
 import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
 
-export type ToBastionSmartAccountParameters = {
-	/** Public client for on-chain reads and chain ID resolution. */
-	client: Client<Transport, Chain | undefined>;
-	/** Owner wallet client — signs UserOps via the connected wallet (e.g. MetaMask). */
-	owner: WalletClient<Transport, Chain | undefined, Account>;
-	/** Deployed SmartAccountFactory address. */
-	factoryAddress: Address;
-	/** CREATE2 salt (default 0). */
-	salt?: bigint;
-	/** Pre-computed counterfactual address (from factory.getAddress). */
-	accountAddress: Address;
+// ── Shared internals ────────────────────────────────────────────────
+
+const entryPoint = {
+	address: entryPoint07Address,
+	abi: entryPoint07Abi,
+	version: '0.7' as const
 };
 
-/**
- * Create a viem `SmartAccount` adapter for the Bastion SmartAccount contract.
- *
- * - Encodes `execute` / `executeBatch` calls using the SmartAccount ABI.
- * - Generates factory initCode using the SmartAccountFactory ABI.
- * - Signs UserOperations with ECDSA via the owner's wallet.
- * - Targets EntryPoint v0.7.
- */
-export async function toBastionSmartAccount(
-	parameters: ToBastionSmartAccountParameters
-): Promise<SmartAccount> {
-	const { client, owner, factoryAddress, salt = 0n, accountAddress } = parameters;
+type SharedParams = {
+	client: Client<Transport, Chain | undefined>;
+	factoryAddress: Address;
+	ownerAddress: Address;
+	salt: bigint;
+	accountAddress: Address;
+	signHash: (hash: Hex) => Promise<Hex>;
+};
 
-	const ownerAddress = owner.account.address;
+/** Build the SmartAccount adapter with a generic signing function. */
+async function buildSmartAccount(params: SharedParams): Promise<SmartAccount> {
+	const { client, factoryAddress, ownerAddress, salt, accountAddress, signHash } = params;
 
-	const entryPoint = {
-		address: entryPoint07Address,
-		abi: entryPoint07Abi,
-		version: '0.7' as const
-	};
-
-	// Memoised chain ID — resolved once, reused for all subsequent UserOp signatures.
 	let resolvedChainId: number | undefined;
 
 	const getResolvedChainId = async (): Promise<number> => {
@@ -106,7 +104,6 @@ export async function toBastionSmartAccount(
 		},
 
 		async getStubSignature() {
-			// 65-byte dummy ECDSA signature used for gas estimation.
 			return '0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c';
 		},
 
@@ -133,9 +130,75 @@ export async function toBastionSmartAccount(
 				chainId
 			});
 
-			return owner.signMessage({
-				message: { raw: hash }
-			});
+			return signHash(hash);
 		}
+	});
+}
+
+// ── Owner adapter (WalletClient) ────────────────────────────────────
+
+export type ToBastionSmartAccountParameters = {
+	/** Public client for on-chain reads and chain ID resolution. */
+	client: Client<Transport, Chain | undefined>;
+	/** Owner wallet client — signs UserOps via the connected wallet (e.g. MetaMask). */
+	owner: WalletClient<Transport, Chain | undefined, Account>;
+	/** Deployed SmartAccountFactory address. */
+	factoryAddress: Address;
+	/** CREATE2 salt (default 0). */
+	salt?: bigint;
+	/** Pre-computed counterfactual address (from factory.getAddress). */
+	accountAddress: Address;
+};
+
+/**
+ * Create a SmartAccount adapter for the owner flow.
+ * Signs UserOperations via the owner's connected wallet (e.g. MetaMask).
+ */
+export async function toBastionSmartAccount(
+	parameters: ToBastionSmartAccountParameters
+): Promise<SmartAccount> {
+	const { client, owner, factoryAddress, salt = 0n, accountAddress } = parameters;
+
+	return buildSmartAccount({
+		client,
+		factoryAddress,
+		ownerAddress: owner.account.address,
+		salt,
+		accountAddress,
+		signHash: (hash) => owner.signMessage({ message: { raw: hash } })
+	});
+}
+
+// ── Session key adapter (LocalAccount) ──────────────────────────────
+
+export type ToSessionKeySmartAccountParameters = {
+	/** Public client for on-chain reads and chain ID resolution. */
+	client: Client<Transport, Chain | undefined>;
+	/** Session key local account (signs UserOps with the private key). */
+	sessionKey: LocalAccount;
+	/** Deployed SmartAccountFactory address. */
+	factoryAddress: Address;
+	/** Owner address (needed for factory initCode, though account is already deployed). */
+	ownerAddress: Address;
+	/** Pre-computed SmartAccount address. */
+	accountAddress: Address;
+};
+
+/**
+ * Create a SmartAccount adapter for the session key flow.
+ * Signs UserOperations locally with the session key's private key.
+ */
+export async function toSessionKeySmartAccount(
+	parameters: ToSessionKeySmartAccountParameters
+): Promise<SmartAccount> {
+	const { client, sessionKey, factoryAddress, ownerAddress, accountAddress } = parameters;
+
+	return buildSmartAccount({
+		client,
+		factoryAddress,
+		ownerAddress,
+		salt: 0n,
+		accountAddress,
+		signHash: (hash) => sessionKey.signMessage({ message: { raw: hash } })
 	});
 }

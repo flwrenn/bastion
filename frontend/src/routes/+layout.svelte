@@ -12,6 +12,7 @@
 	<header class="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
 		<nav class="flex items-center gap-6">
 			<a href="/" class="text-lg font-semibold tracking-tight">Bastion</a>
+			<a href="/session" class="text-sm text-zinc-400 hover:text-zinc-200">Session</a>
 			<a href="/indexer" class="text-sm text-zinc-400 hover:text-zinc-200">Indexer</a>
 		</nav>
 		<ConnectButton />
