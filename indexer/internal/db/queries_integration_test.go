@@ -13,13 +13,14 @@ import (
 // testPool creates an isolated Postgres schema for the test, runs migrations
 // inside it, and returns a pool with search_path pinned to that schema.
 // The schema is dropped on test cleanup, so no shared data is touched.
-// Skips the test when DATABASE_URL is not set.
+// Skips the test when TEST_DATABASE_URL is not set; uses a dedicated env var
+// to avoid accidentally running against a dev/production database.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test")
+		t.Skip("TEST_DATABASE_URL not set — skipping integration test")
 	}
 
 	ctx := context.Background()
