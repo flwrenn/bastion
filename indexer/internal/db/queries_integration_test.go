@@ -2,14 +2,18 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// testPool connects to a real Postgres and runs migrations.
-// It skips the test when DATABASE_URL is not set.
+// testPool creates an isolated Postgres schema for the test, runs migrations
+// inside it, and returns a pool with search_path pinned to that schema.
+// The schema is dropped on test cleanup, so no shared data is touched.
+// Skips the test when DATABASE_URL is not set.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -19,15 +23,45 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	schema := fmt.Sprintf("test_%d", time.Now().UnixNano())
+
+	// Bootstrap: connect with default search_path to create the schema.
+	bootstrap, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		t.Fatalf("connect to test database: %v", err)
+		t.Fatalf("bootstrap connection: %v", err)
 	}
-	t.Cleanup(pool.Close)
+	if _, err := bootstrap.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %q", schema)); err != nil {
+		bootstrap.Close()
+		t.Fatalf("create test schema: %v", err)
+	}
+	bootstrap.Close()
+
+	// Create a pool with search_path pinned to the isolated schema.
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	config.ConnConfig.RuntimeParams["search_path"] = schema
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("create pool with test schema: %v", err)
+	}
 
 	if err := Migrate(ctx, pool); err != nil {
+		pool.Close()
 		t.Fatalf("run migrations: %v", err)
 	}
+
+	t.Cleanup(func() {
+		pool.Close()
+		// Drop the test schema using a fresh connection.
+		cleanup, err := pgxpool.New(context.Background(), dsn)
+		if err == nil {
+			cleanup.Exec(context.Background(), fmt.Sprintf("DROP SCHEMA %q CASCADE", schema))
+			cleanup.Close()
+		}
+	})
 
 	return pool
 }
@@ -35,14 +69,6 @@ func testPool(t *testing.T) *pgxpool.Pool {
 func TestGetStatsIntegration(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
-
-	// Clean slate — delete all existing operations so counts are deterministic.
-	if _, err := pool.Exec(ctx, "DELETE FROM user_operations"); err != nil {
-		t.Fatalf("clean user_operations: %v", err)
-	}
-	t.Cleanup(func() {
-		pool.Exec(context.Background(), "DELETE FROM user_operations WHERE block_number BETWEEN 900000 AND 900001")
-	})
 
 	// Distinct senders and paymasters.
 	senderA := make([]byte, 20)
