@@ -560,9 +560,10 @@ func TestGetStatsHappyPath(t *testing.T) {
 
 	store := &stubStore{
 		stats: db.Stats{
-			TotalOps:      100,
-			SuccessCount:  75,
-			UniqueSenders: 10,
+			TotalOps:       100,
+			SuccessCount:   75,
+			SponsoredCount: 40,
+			UniqueSenders:  10,
 		},
 	}
 	mux := newTestMux(store)
@@ -588,12 +589,19 @@ func TestGetStatsHappyPath(t *testing.T) {
 	if got.SuccessCount != 75 {
 		t.Fatalf("successCount = %d, want 75", got.SuccessCount)
 	}
+	if got.SponsoredCount != 40 {
+		t.Fatalf("sponsoredCount = %d, want 40", got.SponsoredCount)
+	}
 	if got.UniqueSenders != 10 {
 		t.Fatalf("uniqueSenders = %d, want 10", got.UniqueSenders)
 	}
-	wantRate := 0.75
-	if got.SuccessRate != wantRate {
-		t.Fatalf("successRate = %f, want %f", got.SuccessRate, wantRate)
+	wantSuccessRate := 0.75
+	if got.SuccessRate != wantSuccessRate {
+		t.Fatalf("successRate = %f, want %f", got.SuccessRate, wantSuccessRate)
+	}
+	wantSponsoredRate := 0.4
+	if got.SponsoredRate != wantSponsoredRate {
+		t.Fatalf("sponsoredRate = %f, want %f", got.SponsoredRate, wantSponsoredRate)
 	}
 }
 
@@ -620,6 +628,12 @@ func TestGetStatsZeroOps(t *testing.T) {
 	}
 	if got.SuccessRate != 0 {
 		t.Fatalf("successRate = %f, want 0 (avoid division by zero)", got.SuccessRate)
+	}
+	if got.SponsoredCount != 0 {
+		t.Fatalf("sponsoredCount = %d, want 0", got.SponsoredCount)
+	}
+	if got.SponsoredRate != 0 {
+		t.Fatalf("sponsoredRate = %f, want 0 (avoid division by zero)", got.SponsoredRate)
 	}
 }
 

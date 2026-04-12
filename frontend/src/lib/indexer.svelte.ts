@@ -17,6 +17,7 @@ const RECONNECT_DELAY = 3_000;
 const MAX_RECONNECT_DELAY = 30_000;
 const MAX_OPERATIONS = 200;
 const MAX_POLL_FAILURES = 3;
+const STATS_REFRESH_INTERVAL = 30_000;
 
 /** Shape returned by the indexer REST API and WebSocket feed. */
 export interface UserOperation {
@@ -37,6 +38,16 @@ export interface UserOperation {
 
 export type FeedStatus = 'disconnected' | 'connecting' | 'connected' | 'polling';
 
+/** Aggregate statistics returned by GET /api/stats. */
+export interface IndexerStats {
+	totalOps: number;
+	successCount: number;
+	successRate: number;
+	sponsoredCount: number;
+	sponsoredRate: number;
+	uniqueSenders: number;
+}
+
 /**
  * Reactive indexer feed that connects to the WebSocket live feed and falls
  * back to REST API polling when the WebSocket is unavailable.
@@ -47,11 +58,13 @@ export type FeedStatus = 'disconnected' | 'connecting' | 'connected' | 'polling'
  */
 class IndexerFeed {
 	operations = $state<UserOperation[]>([]);
+	stats = $state<IndexerStats | null>(null);
 	status = $state<FeedStatus>('disconnected');
 
 	private ws: WebSocket | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private statsTimer: ReturnType<typeof setInterval> | null = null;
 	private seenHashes = new Set<string>();
 	private abort: AbortController | null = null;
 	private pollFailures = 0;
@@ -65,12 +78,14 @@ class IndexerFeed {
 		this.status = 'connecting';
 		this.loadInitial();
 		this.openWS();
+		this.startStatsRefresh();
 	}
 
 	/** Tear down all connections and timers. */
 	disconnect() {
 		this.stopReconnect();
 		this.stopPolling();
+		this.stopStatsRefresh();
 		this.abort?.abort();
 		this.abort = null;
 		if (this.ws) {
@@ -204,6 +219,31 @@ class IndexerFeed {
 			}
 		} catch {
 			// Will be populated by WS or polling.
+		}
+	}
+
+	// --- stats ---
+
+	private startStatsRefresh() {
+		this.fetchStats();
+		this.statsTimer = setInterval(() => this.fetchStats(), STATS_REFRESH_INTERVAL);
+	}
+
+	private stopStatsRefresh() {
+		if (this.statsTimer !== null) {
+			clearInterval(this.statsTimer);
+			this.statsTimer = null;
+		}
+	}
+
+	private async fetchStats() {
+		const signal = this.abort?.signal;
+		try {
+			const res = await fetch(indexerUrl() + '/api/stats', { signal });
+			if (!res.ok) return;
+			this.stats = (await res.json()) as IndexerStats;
+		} catch {
+			// Silently ignore — stats are non-critical.
 		}
 	}
 

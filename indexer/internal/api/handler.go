@@ -122,16 +122,19 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rate float64
+	var successRate, sponsoredRate float64
 	if s.TotalOps > 0 {
-		rate = float64(s.SuccessCount) / float64(s.TotalOps)
+		successRate = float64(s.SuccessCount) / float64(s.TotalOps)
+		sponsoredRate = float64(s.SponsoredCount) / float64(s.TotalOps)
 	}
 
 	writeJSON(w, http.StatusOK, statsResponse{
-		TotalOps:      s.TotalOps,
-		SuccessCount:  s.SuccessCount,
-		SuccessRate:   rate,
-		UniqueSenders: s.UniqueSenders,
+		TotalOps:       s.TotalOps,
+		SuccessCount:   s.SuccessCount,
+		SuccessRate:    successRate,
+		SponsoredCount: s.SponsoredCount,
+		SponsoredRate:  sponsoredRate,
+		UniqueSenders:  s.UniqueSenders,
 	})
 }
 
@@ -161,10 +164,12 @@ type listResponse struct {
 }
 
 type statsResponse struct {
-	TotalOps      int64   `json:"totalOps"`
-	SuccessCount  int64   `json:"successCount"`
-	SuccessRate   float64 `json:"successRate"`
-	UniqueSenders int64   `json:"uniqueSenders"`
+	TotalOps       int64   `json:"totalOps"`
+	SuccessCount   int64   `json:"successCount"`
+	SuccessRate    float64 `json:"successRate"`
+	SponsoredCount int64   `json:"sponsoredCount"`
+	SponsoredRate  float64 `json:"sponsoredRate"`
+	UniqueSenders  int64   `json:"uniqueSenders"`
 }
 
 func toResponse(op db.UserOperation) operationResponse {
