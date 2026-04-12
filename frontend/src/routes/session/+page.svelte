@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { isAddress, type Hex } from 'viem';
 	import { privateKeyToAccount } from 'viem/accounts';
 	import { publicClient } from '$lib/wallet.svelte';
@@ -48,7 +48,10 @@
 	// ── Live clock for expiry tracking ──────────────────────────────────
 
 	let now = $state(Date.now() / 1000);
-	const timer = setInterval(() => (now = Date.now() / 1000), 1000);
+	let timer: ReturnType<typeof setInterval>;
+	onMount(() => {
+		timer = setInterval(() => (now = Date.now() / 1000), 1000);
+	});
 	onDestroy(() => clearInterval(timer));
 
 	// ── Derived ─────────────────────────────────────────────────────────
