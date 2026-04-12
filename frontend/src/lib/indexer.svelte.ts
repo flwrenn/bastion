@@ -68,6 +68,7 @@ class IndexerFeed {
 	private seenHashes = new Set<string>();
 	private abort: AbortController | null = null;
 	private pollFailures = 0;
+	private statsFailures = 0;
 	private reconnectDelay = RECONNECT_DELAY;
 
 	/** Open the WebSocket connection and load initial data from REST. */
@@ -108,6 +109,7 @@ class IndexerFeed {
 				this.status = 'connected';
 				this.reconnectDelay = RECONNECT_DELAY;
 				this.stopPolling();
+				this.startStatsRefresh(); // Restart stats if stopped during outage.
 			};
 
 			ws.onmessage = (e: MessageEvent) => {
@@ -225,6 +227,8 @@ class IndexerFeed {
 	// --- stats ---
 
 	private startStatsRefresh() {
+		if (this.statsTimer !== null) return; // Already running.
+		this.statsFailures = 0;
 		this.fetchStats();
 		this.statsTimer = setInterval(() => this.fetchStats(), STATS_REFRESH_INTERVAL);
 	}
@@ -241,16 +245,24 @@ class IndexerFeed {
 		try {
 			const res = await fetch(indexerUrl() + '/api/stats', { signal });
 			if (!res.ok) {
-				this.stats = null;
+				this.trackStatsFailure();
 				return;
 			}
+			this.statsFailures = 0;
 			this.stats = (await res.json()) as IndexerStats;
 		} catch {
-			// Null out on real failures so the UI shows em-dashes;
-			// ignore AbortError from disconnect().
+			// Ignore AbortError from disconnect(); track real failures.
 			if (!signal?.aborted) {
-				this.stats = null;
+				this.trackStatsFailure();
 			}
+		}
+	}
+
+	private trackStatsFailure() {
+		this.stats = null;
+		this.statsFailures++;
+		if (this.statsFailures >= MAX_POLL_FAILURES) {
+			this.stopStatsRefresh();
 		}
 	}
 
