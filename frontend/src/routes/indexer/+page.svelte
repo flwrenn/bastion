@@ -8,6 +8,7 @@
 		truncateHex,
 		type FeedStatus
 	} from '$lib/indexer.svelte';
+	import StatsPanel from '$lib/components/StatsPanel.svelte';
 
 	$effect(() => {
 		feed.connect();
@@ -64,6 +65,9 @@
 			{statusLabel[feed.status]}
 		</div>
 	</div>
+
+	<!-- Stats -->
+	<StatsPanel stats={feed.stats} />
 
 	{#if feed.operations.length === 0}
 		<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 py-16 text-center">

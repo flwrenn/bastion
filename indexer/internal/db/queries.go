@@ -161,10 +161,15 @@ func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*
 
 // Stats holds aggregate statistics for indexed user operations.
 type Stats struct {
-	TotalOps      int64
-	SuccessCount  int64
-	UniqueSenders int64
+	TotalOps       int64
+	SuccessCount   int64
+	SponsoredCount int64
+	UniqueSenders  int64
 }
+
+// zeroPaymaster is the 20-byte zero address used to identify self-funded
+// (non-sponsored) operations. Any other paymaster value is considered sponsored.
+var zeroPaymaster = make([]byte, 20)
 
 // GetStats returns aggregate statistics across all indexed operations.
 func GetStats(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
@@ -175,9 +180,11 @@ func GetStats(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 	err := pool.QueryRow(ctx, `
 		SELECT count(*),
 		       count(*) FILTER (WHERE success),
+		       count(*) FILTER (WHERE paymaster != $1),
 		       count(DISTINCT sender)
 		FROM user_operations`,
-	).Scan(&s.TotalOps, &s.SuccessCount, &s.UniqueSenders)
+		zeroPaymaster,
+	).Scan(&s.TotalOps, &s.SuccessCount, &s.SponsoredCount, &s.UniqueSenders)
 	if err != nil {
 		return Stats{}, fmt.Errorf("query stats: %w", err)
 	}
