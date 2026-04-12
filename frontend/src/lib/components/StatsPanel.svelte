@@ -35,28 +35,28 @@
 				>
 					{pct(stats.successRate)}
 				</span>
-		{:else}
-			{'\u2014'}
-		{/if}
-	</p>
-	{#if stats && stats.totalOps > 0}
-		<p class="mt-0.5 text-xs text-zinc-500">
-			{stats.successCount} / {stats.totalOps}
+			{:else}
+				{'\u2014'}
+			{/if}
 		</p>
-	{/if}
-</div>
-
-<!-- Sponsored -->
-<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-4">
-	<p class="text-xs tracking-wider text-zinc-400 uppercase">Sponsored</p>
-	<p class="mt-1 text-2xl font-semibold tabular-nums">
-		{#if stats}
-			<span class={stats.sponsoredRate > 0 ? 'text-emerald-400' : ''}>
-				{pct(stats.sponsoredRate)}
-			</span>
-		{:else}
-			{'\u2014'}
+		{#if stats && stats.totalOps > 0}
+			<p class="mt-0.5 text-xs text-zinc-500">
+				{stats.successCount} / {stats.totalOps}
+			</p>
 		{/if}
+	</div>
+
+	<!-- Sponsored -->
+	<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-4">
+		<p class="text-xs tracking-wider text-zinc-400 uppercase">Sponsored</p>
+		<p class="mt-1 text-2xl font-semibold tabular-nums">
+			{#if stats}
+				<span class={stats.sponsoredRate > 0 ? 'text-emerald-400' : ''}>
+					{pct(stats.sponsoredRate)}
+				</span>
+			{:else}
+				{'\u2014'}
+			{/if}
 		</p>
 		{#if stats && stats.totalOps > 0}
 			<p class="mt-0.5 text-xs text-zinc-500">
