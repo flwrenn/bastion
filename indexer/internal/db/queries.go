@@ -42,23 +42,19 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	}
 	ClampListParams(&p)
 
-	var total int64
+	// Use count(*) OVER() as a window function so the total and page data
+	// come from a single query (atomic snapshot). When the page is empty
+	// (no matching rows or offset beyond total), total is 0.
+
 	var rows pgx.Rows
 	var err error
 
 	if p.Sender != nil {
-		err = pool.QueryRow(ctx,
-			"SELECT count(*) FROM user_operations WHERE sender = $1",
-			p.Sender,
-		).Scan(&total)
-		if err != nil {
-			return nil, 0, fmt.Errorf("count operations: %w", err)
-		}
-
 		rows, err = pool.Query(ctx, `
 			SELECT id, user_op_hash, sender, paymaster, target, calldata,
 			       nonce, success, actual_gas_cost, actual_gas_used,
-			       tx_hash, block_number, block_timestamp, log_index
+			       tx_hash, block_number, block_timestamp, log_index,
+			       count(*) OVER() AS total
 			FROM user_operations
 			WHERE sender = $1
 			ORDER BY block_number DESC, log_index DESC
@@ -66,17 +62,11 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 			p.Sender, p.Limit, p.Offset,
 		)
 	} else {
-		err = pool.QueryRow(ctx,
-			"SELECT count(*) FROM user_operations",
-		).Scan(&total)
-		if err != nil {
-			return nil, 0, fmt.Errorf("count operations: %w", err)
-		}
-
 		rows, err = pool.Query(ctx, `
 			SELECT id, user_op_hash, sender, paymaster, target, calldata,
 			       nonce, success, actual_gas_cost, actual_gas_used,
-			       tx_hash, block_number, block_timestamp, log_index
+			       tx_hash, block_number, block_timestamp, log_index,
+			       count(*) OVER() AS total
 			FROM user_operations
 			ORDER BY block_number DESC, log_index DESC
 			LIMIT $1 OFFSET $2`,
@@ -88,6 +78,7 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	}
 	defer rows.Close()
 
+	var total int64
 	var ops []UserOperation
 	for rows.Next() {
 		var op UserOperation
@@ -106,6 +97,7 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 			&op.BlockNumber,
 			&op.BlockTimestamp,
 			&op.LogIndex,
+			&total,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan operation: %w", err)
 		}
