@@ -245,6 +245,9 @@ func clearOptionalIndexerEnv(t *testing.T) {
 	t.Setenv("INDEXER_REQUEST_TIMEOUT", "")
 	t.Setenv("INDEXER_RPC_CONCURRENCY", "")
 	t.Setenv("INDEXER_RPC_RESPONSE_MAX_BYTES", "")
+	t.Setenv("INDEXER_RPC_MAX_RETRIES", "")
+	t.Setenv("INDEXER_RPC_RETRY_BASE_DELAY", "")
+	t.Setenv("INDEXER_RPC_RETRY_MAX_DELAY", "")
 	t.Setenv("INDEXER_ENABLE_TX_ENRICHMENT", "")
 	t.Setenv("INDEXER_ALLOW_CURSOR_TRIM", "")
 }

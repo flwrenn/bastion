@@ -173,8 +173,8 @@ func LoadConfigFromEnv() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("parse INDEXER_RPC_MAX_RETRIES: %w", err)
 		}
-		if maxRetries <= 0 {
-			return Config{}, fmt.Errorf("INDEXER_RPC_MAX_RETRIES must be greater than 0")
+		if maxRetries <= 0 || maxRetries > 20 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_MAX_RETRIES must be between 1 and 20")
 		}
 		cfg.RPCMaxRetries = maxRetries
 	}
