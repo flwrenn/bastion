@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -265,6 +266,7 @@ func (c *rpcClient) backoffDelay(attempt int, err error) time.Duration {
 // parseRetryAfter extracts a duration from the Retry-After HTTP header.
 // Supports both delay-seconds and HTTP-date formats.
 func parseRetryAfter(header string) time.Duration {
+	header = strings.TrimSpace(header)
 	if header == "" {
 		return 0
 	}
