@@ -28,7 +28,7 @@ func TestRunReturnsErrorWhenPoolIsNil(t *testing.T) {
 
 	svc := &Service{
 		cfg: Config{PollInterval: time.Second},
-		rpc: newRPCClient("http://127.0.0.1:1", 1024),
+		rpc: newRPCClient("http://127.0.0.1:1", 1024, retryConfig{MaxAttempts: 1, RequestTimeout: 5 * time.Second}),
 	}
 
 	err := svc.Run(context.Background())

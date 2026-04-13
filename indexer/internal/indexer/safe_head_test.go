@@ -22,7 +22,7 @@ func TestSafeHeadReturnsNoSafeHeadWhenConfirmationsNotMet(t *testing.T) {
 			Confirmations:  5,
 			RequestTimeout: time.Second,
 		},
-		rpc: newRPCClient(server.URL, 1024),
+		rpc: newRPCClient(server.URL, 1024, retryConfig{MaxAttempts: 1, RequestTimeout: 5 * time.Second}),
 	}
 
 	_, ok, err := service.safeHead(context.Background())

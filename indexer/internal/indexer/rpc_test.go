@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRPCCallRejectsOversizedResponse(t *testing.T) {
@@ -26,7 +27,7 @@ func TestRPCCallRejectsOversizedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := newRPCClient(server.URL, limit)
+	client := newRPCClient(server.URL, limit, retryConfig{MaxAttempts: 1, RequestTimeout: 5 * time.Second})
 	err := client.call(context.Background(), "eth_blockNumber", []any{}, nil)
 	if err == nil {
 		t.Fatal("expected oversized response error")
