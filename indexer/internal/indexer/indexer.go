@@ -78,9 +78,14 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	}
 
 	return &Service{
-		cfg:                          cfg,
-		pool:                         pool,
-		rpc:                          newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes),
+		cfg:  cfg,
+		pool: pool,
+		rpc: newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes, retryConfig{
+			MaxAttempts:    cfg.RPCMaxRetries,
+			BaseDelay:      cfg.RPCRetryBaseDelay,
+			MaxDelay:       cfg.RPCRetryMaxDelay,
+			RequestTimeout: cfg.RequestTimeout,
+		}),
 		entryPoint:                   normalizedEntryPoint,
 		blockTimestampCache:          make(map[uint64]int64),
 		newHeadSubscriptionFactory:   newWebSocketHeadSubscription,
@@ -431,10 +436,7 @@ func (s *Service) safeHead(ctx context.Context) (uint64, bool, error) {
 		return 0, false, err
 	}
 
-	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
-	defer cancel()
-
-	latest, err := s.rpc.latestBlockNumber(requestCtx)
+	latest, err := s.rpc.latestBlockNumber(ctx)
 	if err != nil {
 		return 0, false, err
 	}
@@ -514,9 +516,7 @@ func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint
 }
 
 func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlock uint64) error {
-	requestCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
-	logs, err := s.rpc.getLogs(requestCtx, s.entryPoint, userOperationEventTopic, fromBlock, toBlock)
-	cancel()
+	logs, err := s.rpc.getLogs(ctx, s.entryPoint, userOperationEventTopic, fromBlock, toBlock)
 	if err != nil {
 		return fmt.Errorf("fetch logs [%d,%d]: %w", fromBlock, toBlock, err)
 	}
@@ -672,9 +672,7 @@ func (s *Service) loadTransactionOperationMeta(ctx context.Context, logs []rpcLo
 				return
 			}
 
-			requestCtx, requestCancel := context.WithTimeout(workerCtx, s.cfg.RequestTimeout)
-			tx, err := s.rpc.getTransactionByHash(requestCtx, job.rawHash)
-			requestCancel()
+			tx, err := s.rpc.getTransactionByHash(workerCtx, job.rawHash)
 			if err != nil {
 				setErr(fmt.Errorf("load tx %s: %w", job.rawHash, err))
 				return
@@ -787,9 +785,7 @@ func (s *Service) loadBlockTimestamps(ctx context.Context, logs []rpcLog) (map[u
 				return
 			}
 
-			requestCtx, requestCancel := context.WithTimeout(workerCtx, s.cfg.RequestTimeout)
-			block, err := s.rpc.getBlockByNumber(requestCtx, job.blockNumber)
-			requestCancel()
+			block, err := s.rpc.getBlockByNumber(workerCtx, job.blockNumber)
 			if err != nil {
 				setErr(fmt.Errorf("load block %d: %w", job.blockNumber, err))
 				return

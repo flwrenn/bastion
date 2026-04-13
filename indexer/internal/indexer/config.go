@@ -11,13 +11,16 @@ import (
 )
 
 const (
-	defaultEntryPoint     = "0x0000000071727de22e5e9d8baf0edac6f37da032"
-	defaultBatchSize      = uint64(500)
-	defaultConfirmations  = uint64(3)
-	defaultPollInterval   = 4 * time.Second
-	defaultRequestTimeout = 15 * time.Second
-	defaultRPCConcurrency = 8
-	defaultRPCResponseMax = 8 * 1024 * 1024
+	defaultEntryPoint        = "0x0000000071727de22e5e9d8baf0edac6f37da032"
+	defaultBatchSize         = uint64(500)
+	defaultConfirmations     = uint64(3)
+	defaultPollInterval      = 4 * time.Second
+	defaultRequestTimeout    = 15 * time.Second
+	defaultRPCConcurrency    = 8
+	defaultRPCResponseMax    = 8 * 1024 * 1024
+	defaultRPCMaxRetries     = 5
+	defaultRPCRetryBaseDelay = 500 * time.Millisecond
+	defaultRPCRetryMaxDelay  = 30 * time.Second
 
 	stateKeyLastIndexedBlock = "user_operations.last_indexed_block"
 )
@@ -35,6 +38,9 @@ type Config struct {
 	RequestTimeout      time.Duration
 	RPCConcurrency      int
 	RPCResponseMaxBytes int64
+	RPCMaxRetries       int
+	RPCRetryBaseDelay   time.Duration
+	RPCRetryMaxDelay    time.Duration
 	EnableTxEnrichment  bool
 	AllowCursorTrim     bool
 	StateKey            string
@@ -50,6 +56,9 @@ func LoadConfigFromEnv() (Config, error) {
 		RequestTimeout:      defaultRequestTimeout,
 		RPCConcurrency:      defaultRPCConcurrency,
 		RPCResponseMaxBytes: defaultRPCResponseMax,
+		RPCMaxRetries:       defaultRPCMaxRetries,
+		RPCRetryBaseDelay:   defaultRPCRetryBaseDelay,
+		RPCRetryMaxDelay:    defaultRPCRetryMaxDelay,
 		EnableTxEnrichment:  true,
 		StateKey:            stateKeyLastIndexedBlock,
 	}
@@ -157,6 +166,39 @@ func LoadConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("INDEXER_RPC_RESPONSE_MAX_BYTES must be less than %d", math.MaxInt64)
 		}
 		cfg.RPCResponseMaxBytes = limit
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_RPC_MAX_RETRIES")); value != "" {
+		maxRetries, err := strconv.Atoi(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_RPC_MAX_RETRIES: %w", err)
+		}
+		if maxRetries <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_MAX_RETRIES must be greater than 0")
+		}
+		cfg.RPCMaxRetries = maxRetries
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_RPC_RETRY_BASE_DELAY")); value != "" {
+		baseDelay, err := time.ParseDuration(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_RPC_RETRY_BASE_DELAY: %w", err)
+		}
+		if baseDelay <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_RETRY_BASE_DELAY must be greater than 0")
+		}
+		cfg.RPCRetryBaseDelay = baseDelay
+	}
+
+	if value := strings.TrimSpace(os.Getenv("INDEXER_RPC_RETRY_MAX_DELAY")); value != "" {
+		maxDelay, err := time.ParseDuration(value)
+		if err != nil {
+			return Config{}, fmt.Errorf("parse INDEXER_RPC_RETRY_MAX_DELAY: %w", err)
+		}
+		if maxDelay <= 0 {
+			return Config{}, fmt.Errorf("INDEXER_RPC_RETRY_MAX_DELAY must be greater than 0")
+		}
+		cfg.RPCRetryMaxDelay = maxDelay
 	}
 
 	if value := strings.TrimSpace(os.Getenv("INDEXER_ENABLE_TX_ENRICHMENT")); value != "" {
