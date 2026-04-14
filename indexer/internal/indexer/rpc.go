@@ -84,7 +84,11 @@ type httpStatusError struct {
 }
 
 func (e *httpStatusError) Error() string {
-	return fmt.Sprintf("rpc %s: HTTP %d: %s", e.method, e.statusCode, e.body)
+	body := e.body
+	if len(body) > 256 {
+		body = body[:256] + "…(truncated)"
+	}
+	return fmt.Sprintf("rpc %s: HTTP %d: %s", e.method, e.statusCode, body)
 }
 
 // jsonRPCCallError wraps a JSON-RPC level error (error field in response).
