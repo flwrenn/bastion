@@ -13,7 +13,11 @@ contracts/broadcast/**/dry-run/
 # Frontend
 .svelte-kit/
 frontend/build/
-frontend/src/lib/contracts/
+# Generated contract ABIs and addresses — keep the directory but ignore per-ABI
+# TypeScript modules. addresses.ts is committed so the frontend has a sensible
+# default without requiring PUBLIC_*_ADDRESS env overrides.
+frontend/src/lib/contracts/*.ts
+!frontend/src/lib/contracts/addresses.ts
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
