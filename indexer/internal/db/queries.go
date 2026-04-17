@@ -34,42 +34,44 @@ func ClampListParams(p *ListParams) {
 	}
 }
 
-// ListOperations returns a page of user operations ordered newest-first,
-// along with the total count matching the filter.
+// ListOperations returns a page of user operations enriched with the
+// denormalized accountDeployed / revertReason fields, ordered newest-first.
 func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]UserOperation, int64, error) {
 	if pool == nil {
 		return nil, 0, errors.New("pool is required")
 	}
 	ClampListParams(&p)
 
-	// Use count(*) OVER() as a window function so the total and page data
-	// come from a single query (atomic snapshot). When the page is empty
-	// (no matching rows or offset beyond total), total is 0.
+	const selectCols = `
+		uo.id, uo.user_op_hash, uo.sender, uo.paymaster, uo.target, uo.calldata,
+		uo.nonce, uo.success, uo.actual_gas_cost, uo.actual_gas_used,
+		uo.tx_hash, uo.block_number, uo.block_timestamp, uo.log_index,
+		(ad.user_op_hash IS NOT NULL) AS account_deployed,
+		ur.revert_reason,
+		count(*) OVER() AS total
+	`
+	const joinClause = `
+		FROM user_operations uo
+		LEFT JOIN account_deployments      ad ON ad.user_op_hash = uo.user_op_hash
+		LEFT JOIN user_operation_reverts   ur ON ur.user_op_hash = uo.user_op_hash
+	`
 
 	var rows pgx.Rows
 	var err error
 
 	if p.Sender != nil {
-		rows, err = pool.Query(ctx, `
-			SELECT id, user_op_hash, sender, paymaster, target, calldata,
-			       nonce, success, actual_gas_cost, actual_gas_used,
-			       tx_hash, block_number, block_timestamp, log_index,
-			       count(*) OVER() AS total
-			FROM user_operations
-			WHERE sender = $1
-			ORDER BY block_number DESC, log_index DESC
-			LIMIT $2 OFFSET $3`,
+		rows, err = pool.Query(ctx,
+			`SELECT `+selectCols+joinClause+`
+			 WHERE uo.sender = $1
+			 ORDER BY uo.block_number DESC, uo.log_index DESC
+			 LIMIT $2 OFFSET $3`,
 			p.Sender, p.Limit, p.Offset,
 		)
 	} else {
-		rows, err = pool.Query(ctx, `
-			SELECT id, user_op_hash, sender, paymaster, target, calldata,
-			       nonce, success, actual_gas_cost, actual_gas_used,
-			       tx_hash, block_number, block_timestamp, log_index,
-			       count(*) OVER() AS total
-			FROM user_operations
-			ORDER BY block_number DESC, log_index DESC
-			LIMIT $1 OFFSET $2`,
+		rows, err = pool.Query(ctx,
+			`SELECT `+selectCols+joinClause+`
+			 ORDER BY uo.block_number DESC, uo.log_index DESC
+			 LIMIT $1 OFFSET $2`,
 			p.Limit, p.Offset,
 		)
 	}
@@ -82,6 +84,7 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	var ops []UserOperation
 	for rows.Next() {
 		var op UserOperation
+		var revertReason []byte // nullable
 		if err := rows.Scan(
 			&op.ID,
 			&op.UserOpHash,
@@ -97,10 +100,13 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 			&op.BlockNumber,
 			&op.BlockTimestamp,
 			&op.LogIndex,
+			&op.AccountDeployed,
+			&revertReason,
 			&total,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan operation: %w", err)
 		}
+		op.RevertReason = revertReason
 		ops = append(ops, op)
 	}
 	if err := rows.Err(); err != nil {
@@ -110,20 +116,25 @@ func ListOperations(ctx context.Context, pool *pgxpool.Pool, p ListParams) ([]Us
 	return ops, total, nil
 }
 
-// GetOperationByHash returns a single user operation by its userOpHash.
-// Returns nil, nil when no matching row exists.
+// GetOperationByHash returns a single user operation enriched with
+// accountDeployed / revertReason. Returns nil, nil when no match.
 func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*UserOperation, error) {
 	if pool == nil {
 		return nil, errors.New("pool is required")
 	}
 	var op UserOperation
+	var revertReason []byte
 	err := pool.QueryRow(ctx, `
-		SELECT id, user_op_hash, sender, paymaster, target, calldata,
-		       nonce, success, actual_gas_cost, actual_gas_used,
-		       tx_hash, block_number, block_timestamp, log_index
-		FROM user_operations
-		WHERE user_op_hash = $1
-		ORDER BY block_number DESC, log_index DESC
+		SELECT uo.id, uo.user_op_hash, uo.sender, uo.paymaster, uo.target, uo.calldata,
+		       uo.nonce, uo.success, uo.actual_gas_cost, uo.actual_gas_used,
+		       uo.tx_hash, uo.block_number, uo.block_timestamp, uo.log_index,
+		       (ad.user_op_hash IS NOT NULL) AS account_deployed,
+		       ur.revert_reason
+		FROM user_operations uo
+		LEFT JOIN account_deployments     ad ON ad.user_op_hash = uo.user_op_hash
+		LEFT JOIN user_operation_reverts  ur ON ur.user_op_hash = uo.user_op_hash
+		WHERE uo.user_op_hash = $1
+		ORDER BY uo.block_number DESC, uo.log_index DESC
 		LIMIT 1`,
 		hash,
 	).Scan(
@@ -141,6 +152,8 @@ func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*
 		&op.BlockNumber,
 		&op.BlockTimestamp,
 		&op.LogIndex,
+		&op.AccountDeployed,
+		&revertReason,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -148,6 +161,7 @@ func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*
 		}
 		return nil, fmt.Errorf("query operation by hash: %w", err)
 	}
+	op.RevertReason = revertReason
 	return &op, nil
 }
 
