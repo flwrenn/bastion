@@ -1,5 +1,8 @@
-.PHONY: forge-build forge-test chain export-abis dev build test lint \
-       indexer-build indexer-test indexer-dev frontend-dev
+.PHONY: forge-build forge-test forge-deploy forge-deploy-dry chain \
+       export-abis export-addresses dev build test lint \
+       indexer-build indexer-test indexer-dev \
+       frontend-dev frontend-build frontend-lint \
+       db-up db-down db-logs
 
 # ── Foundry ──────────────────────────────────────────────────
 forge-build:
@@ -8,8 +11,34 @@ forge-build:
 forge-test:
 	cd contracts && forge test -vvv
 
+forge-deploy:
+ifndef ETHERSCAN_API_KEY
+	$(error ETHERSCAN_API_KEY is not set — required for contract verification)
+endif
+	cd contracts && SAVE_DEPLOY=true forge script script/Deploy.s.sol:Deploy \
+		--rpc-url sepolia \
+		--broadcast \
+		--verify \
+		--etherscan-api-key $(ETHERSCAN_API_KEY) \
+		-vvvv
+
+forge-deploy-dry:
+	cd contracts && forge script script/Deploy.s.sol:Deploy \
+		--rpc-url sepolia \
+		-vvvv
+
 chain:
 	anvil
+
+# ── Database ─────────────────────────────────────────────────
+db-up:
+	docker compose up -d postgres
+
+db-down:
+	docker compose down
+
+db-logs:
+	docker compose logs -f postgres
 
 # ── Go indexer ───────────────────────────────────────────────
 indexer-build:
@@ -34,6 +63,9 @@ frontend-lint:
 # ── ABI bridge ───────────────────────────────────────────────
 export-abis: forge-build
 	./scripts/export-abis.sh
+
+export-addresses:
+	./scripts/export-addresses.sh
 
 # ── Full stack ───────────────────────────────────────────────
 dev:

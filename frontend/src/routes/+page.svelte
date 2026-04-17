@@ -1,2 +1,120 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<script lang="ts">
+	import { wallet } from '$lib/wallet.svelte';
+	import { account } from '$lib/account.svelte';
+	import { etherscanAddress, truncateHex } from '$lib/explorer';
+	import CounterCard from '$lib/components/CounterCard.svelte';
+	import FaucetTokenCard from '$lib/components/FaucetTokenCard.svelte';
+	import SessionKeyManager from '$lib/components/SessionKeyManager.svelte';
+
+	$effect(() => {
+		if (wallet.address && wallet.correctChain) {
+			account.load(wallet.address);
+		} else {
+			account.reset();
+		}
+	});
+</script>
+
+<div class="mx-auto max-w-xl">
+	{#if wallet.connected}
+		<h1 class="mb-4 text-2xl font-bold">Dashboard</h1>
+		<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 p-6">
+			<dl class="space-y-3">
+				<div class="flex justify-between">
+					<dt class="text-zinc-400">Address</dt>
+					<dd class="font-mono text-sm">{wallet.address}</dd>
+				</div>
+				<div class="flex justify-between">
+					<dt class="text-zinc-400">Network</dt>
+					<dd>{wallet.chainName}</dd>
+				</div>
+			</dl>
+		</div>
+
+		{#if wallet.correctChain}
+			<h2 class="mt-8 mb-4 text-xl font-bold">Smart Account</h2>
+			<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 p-6">
+				<dl class="space-y-3">
+					{#if account.smartAccountAddress}
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">Account Address</dt>
+							<dd class="font-mono text-sm">
+								<a
+									href={etherscanAddress(account.smartAccountAddress)}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-indigo-400 hover:text-indigo-300"
+								>
+									{truncateHex(account.smartAccountAddress)}
+								</a>
+							</dd>
+						</div>
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">Status</dt>
+							<dd>
+								{#if account.deploying}
+									<span class="text-yellow-400">Deploying...</span>
+								{:else if account.deployed}
+									<span class="text-green-400">Deployed</span>
+								{:else}
+									<span class="text-zinc-400">Not deployed</span>
+								{/if}
+							</dd>
+						</div>
+					{:else if !account.error}
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">Account Address</dt>
+							<dd class="text-zinc-400">Loading...</dd>
+						</div>
+					{/if}
+
+					{#if account.deployUserOpHash}
+						<div class="flex justify-between">
+							<dt class="text-zinc-400">UserOp Hash</dt>
+							<dd class="font-mono text-sm">
+								<a
+									href="https://jiffyscan.xyz/userOpHash/{account.deployUserOpHash}?network=sepolia"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-indigo-400 hover:text-indigo-300"
+								>
+									{truncateHex(account.deployUserOpHash)}
+								</a>
+							</dd>
+						</div>
+					{/if}
+				</dl>
+
+				{#if account.error}
+					<p class="mt-4 text-sm text-red-400">{account.error}</p>
+				{/if}
+
+				{#if account.smartAccountAddress && !account.deployed && !account.deploying}
+					<button
+						type="button"
+						class="mt-4 w-full cursor-pointer rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+						onclick={() => account.deploy()}
+					>
+						Deploy Account
+					</button>
+				{/if}
+			</div>
+
+			{#if account.deployed && account.smartAccountAddress}
+				<h2 class="mt-8 mb-4 text-xl font-bold">Interact</h2>
+				<div class="space-y-4">
+					<CounterCard accountAddress={account.smartAccountAddress} />
+					<FaucetTokenCard accountAddress={account.smartAccountAddress} />
+				</div>
+
+				<h2 class="mt-8 mb-4 text-xl font-bold">Session Keys</h2>
+				<SessionKeyManager accountAddress={account.smartAccountAddress} />
+			{/if}
+		{/if}
+	{:else}
+		<div class="py-24 text-center">
+			<h1 class="mb-3 text-2xl font-bold">Bastion</h1>
+			<p class="text-zinc-400">Connect your wallet to get started.</p>
+		</div>
+	{/if}
+</div>

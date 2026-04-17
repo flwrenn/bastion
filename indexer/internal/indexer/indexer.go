@@ -1,0 +1,1048 @@
+package indexer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"net/url"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/flwrenn/bastion/indexer/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Service struct {
+	cfg                          Config
+	pool                         *pgxpool.Pool
+	rpc                          *rpcClient
+	entryPoint                   string
+	blockTimestampCache          map[uint64]int64
+	cacheMu                      sync.RWMutex
+	newHeadSubscriptionFactory   func(context.Context, string) (headSubscription, error)
+	subscriptionReconnectBackoff time.Duration
+	indexOnceFunc                func(context.Context) error
+
+	// OnOperationsIndexed is called after new operations are persisted.
+	// It is safe to leave nil.
+	OnOperationsIndexed func([]db.UserOperation)
+}
+
+const blockTimestampCacheMaxEntries = 4096
+
+var errInitialBackfillStartBlockRequired = errors.New("initial backfill start block is required")
+
+func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
+	if cfg.RPCURL == "" {
+		return nil, fmt.Errorf("RPCURL is required")
+	}
+	if cfg.PollInterval <= 0 {
+		return nil, fmt.Errorf("PollInterval must be greater than 0")
+	}
+	if cfg.BatchSize == 0 {
+		return nil, fmt.Errorf("BatchSize must be greater than 0")
+	}
+	if cfg.RequestTimeout <= 0 {
+		return nil, fmt.Errorf("RequestTimeout must be greater than 0")
+	}
+	if cfg.RPCConcurrency <= 0 {
+		return nil, fmt.Errorf("RPCConcurrency must be greater than 0")
+	}
+	if cfg.RPCResponseMaxBytes <= 0 {
+		return nil, fmt.Errorf("RPCResponseMaxBytes must be greater than 0")
+	}
+	if cfg.RPCResponseMaxBytes >= math.MaxInt64 {
+		return nil, fmt.Errorf("RPCResponseMaxBytes must be less than %d", math.MaxInt64)
+	}
+	if cfg.RPCMaxRetries <= 0 {
+		return nil, fmt.Errorf("RPCMaxRetries must be greater than 0")
+	}
+	if cfg.RPCMaxRetries > maxRPCMaxRetries {
+		return nil, fmt.Errorf("RPCMaxRetries must be at most %d", maxRPCMaxRetries)
+	}
+	if cfg.RPCRetryBaseDelay <= 0 {
+		return nil, fmt.Errorf("RPCRetryBaseDelay must be greater than 0")
+	}
+	if cfg.RPCRetryMaxDelay <= 0 {
+		return nil, fmt.Errorf("RPCRetryMaxDelay must be greater than 0")
+	}
+	if cfg.RPCRetryBaseDelay > cfg.RPCRetryMaxDelay {
+		return nil, fmt.Errorf(
+			"RPCRetryBaseDelay (%s) must not exceed RPCRetryMaxDelay (%s)",
+			cfg.RPCRetryBaseDelay,
+			cfg.RPCRetryMaxDelay,
+		)
+	}
+	if cfg.StateKey == "" {
+		return nil, fmt.Errorf("StateKey is required")
+	}
+	if pool == nil {
+		return nil, fmt.Errorf("pool is required")
+	}
+	if cfg.WSURL != "" {
+		normalizedWSURL, err := normalizeWebSocketURL(cfg.WSURL)
+		if err != nil {
+			return nil, fmt.Errorf("normalize WSURL: %w", err)
+		}
+		cfg.WSURL = normalizedWSURL
+	}
+
+	normalizedEntryPoint, err := normalizeAddress(cfg.EntryPoint)
+	if err != nil {
+		return nil, fmt.Errorf("normalize entrypoint: %w", err)
+	}
+
+	return &Service{
+		cfg:  cfg,
+		pool: pool,
+		rpc: newRPCClient(cfg.RPCURL, cfg.RPCResponseMaxBytes, retryConfig{
+			MaxAttempts:    cfg.RPCMaxRetries,
+			BaseDelay:      cfg.RPCRetryBaseDelay,
+			MaxDelay:       cfg.RPCRetryMaxDelay,
+			RequestTimeout: cfg.RequestTimeout,
+		}),
+		entryPoint:                   normalizedEntryPoint,
+		blockTimestampCache:          make(map[uint64]int64),
+		newHeadSubscriptionFactory:   newWebSocketHeadSubscription,
+		subscriptionReconnectBackoff: defaultSubscriptionBackoff,
+	}, nil
+}
+
+func (s *Service) Run(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return nil
+	}
+	if s.cfg.PollInterval <= 0 {
+		return fmt.Errorf("PollInterval must be greater than 0")
+	}
+	if s.pool == nil {
+		return fmt.Errorf("pool is required")
+	}
+	if s.rpc == nil {
+		return fmt.Errorf("rpc client is required")
+	}
+
+	if err := s.runIndexOnce(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("initial index iteration failed: %w", err)
+	}
+
+	runCtx, stopRun := context.WithCancel(ctx)
+	defer stopRun()
+
+	ticker := time.NewTicker(s.cfg.PollInterval)
+	defer ticker.Stop()
+	wakeCh := make(chan struct{}, 1)
+
+	if s.cfg.WSURL != "" {
+		slog.Info("starting head subscription", "ws_endpoint", websocketLogEndpoint(s.cfg.WSURL))
+		go s.runHeadSubscriptionLoop(runCtx, wakeCh)
+	}
+
+	runIteration := func() error {
+		err := s.runIndexOnce(runCtx)
+		if err == nil {
+			return nil
+		}
+		if runCtx.Err() != nil {
+			return nil
+		}
+		if isFatalIndexIterationError(err) {
+			return fmt.Errorf("index iteration failed: %w", err)
+		}
+		slog.Error("index iteration failed", "err", err)
+		return nil
+	}
+
+	for {
+		select {
+		case <-runCtx.Done():
+			return nil
+		case <-ticker.C:
+			if err := runIteration(); err != nil {
+				return err
+			}
+		case <-wakeCh:
+			if err := runIteration(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *Service) runIndexOnce(ctx context.Context) error {
+	if s.indexOnceFunc != nil {
+		return s.indexOnceFunc(ctx)
+	}
+
+	return s.indexOnce(ctx)
+}
+
+func (s *Service) runHeadSubscriptionLoop(ctx context.Context, wakeCh chan<- struct{}) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		connectCtx, cancelConnect := context.WithTimeout(ctx, s.subscriptionConnectTimeout())
+		subscription, err := s.newHeadSubscription(connectCtx)
+		cancelConnect()
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if s.cfg.WSURL == "" {
+				return
+			}
+			slog.Warn("head subscription connect failed; retrying", "err", redactWebSocketURLError(err, s.cfg.WSURL))
+			if !sleepContext(ctx, s.subscriptionBackoff()) {
+				return
+			}
+			continue
+		}
+
+		slog.Info("head subscription connected")
+
+		err = s.consumeHeadSubscription(ctx, subscription, wakeCh)
+		closeErr := subscription.Close()
+		if closeErr != nil && ctx.Err() == nil {
+			slog.Warn("head subscription close failed", "err", closeErr)
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		if err != nil {
+			slog.Warn("head subscription disconnected; reconnecting", "err", redactWebSocketURLError(err, s.cfg.WSURL))
+		}
+		if !sleepContext(ctx, s.subscriptionBackoff()) {
+			return
+		}
+	}
+}
+
+func (s *Service) subscriptionConnectTimeout() time.Duration {
+	if s.cfg.RequestTimeout <= 0 {
+		return defaultRequestTimeout
+	}
+
+	return s.cfg.RequestTimeout
+}
+
+func websocketLogEndpoint(wsURL string) string {
+	parsed, err := url.Parse(wsURL)
+	if err != nil || parsed.Host == "" {
+		return "invalid"
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme == "" {
+		return parsed.Host
+	}
+
+	return scheme + "://" + parsed.Host
+}
+
+func redactWebSocketURLError(err error, wsURL string) error {
+	if err == nil {
+		return nil
+	}
+	if wsURL == "" {
+		return err
+	}
+
+	errText := err.Error()
+
+	endpoint := websocketLogEndpoint(wsURL)
+	redacted := strings.ReplaceAll(errText, wsURL, endpoint)
+	if redacted == errText {
+		return err
+	}
+
+	return &redactedWebSocketError{message: redacted, cause: err}
+}
+
+type redactedWebSocketError struct {
+	message string
+	cause   error
+}
+
+func (e *redactedWebSocketError) Error() string {
+	return e.message
+}
+
+func (e *redactedWebSocketError) Unwrap() error {
+	return e.cause
+}
+
+func (s *Service) subscriptionBackoff() time.Duration {
+	if s.subscriptionReconnectBackoff <= 0 {
+		return defaultSubscriptionBackoff
+	}
+
+	return s.subscriptionReconnectBackoff
+}
+
+func (s *Service) newHeadSubscription(ctx context.Context) (headSubscription, error) {
+	factory := s.newHeadSubscriptionFactory
+	if factory == nil {
+		factory = newWebSocketHeadSubscription
+	}
+
+	return factory(ctx, s.cfg.WSURL)
+}
+
+func (s *Service) consumeHeadSubscription(ctx context.Context, subscription headSubscription, wakeCh chan<- struct{}) error {
+	for {
+		if err := subscription.Next(ctx); err != nil {
+			return err
+		}
+
+		select {
+		case wakeCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func isFatalIndexIterationError(err error) bool {
+	return errors.Is(err, errInitialBackfillStartBlockRequired)
+}
+
+func (s *Service) indexOnce(ctx context.Context) error {
+	cursor, hasCursor, err := db.GetStateUint64(ctx, s.pool, s.cfg.StateKey)
+	if err != nil {
+		return fmt.Errorf("load cursor: %w", err)
+	}
+	if err := s.validateInitialBackfillConfig(hasCursor); err != nil {
+		return err
+	}
+
+	safeHead, hasSafeHead, err := s.safeHead(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch safe head: %w", err)
+	}
+	if !hasSafeHead {
+		slog.Debug("indexer idle", "reason", "no_safe_head_yet")
+		return nil
+	}
+
+	trimmedCursor := false
+	if hasCursor && cursor > safeHead {
+		delta := cursor - safeHead
+		if !s.cfg.AllowCursorTrim {
+			slog.Warn(
+				"cursor ahead of safe head; skipping iteration",
+				"cursor",
+				cursor,
+				"safe_head",
+				safeHead,
+				"delta",
+				delta,
+			)
+			return nil
+		}
+
+		slog.Warn(
+			"cursor ahead of safe head; trimming future rows",
+			"cursor",
+			cursor,
+			"safe_head",
+			safeHead,
+			"delta",
+			delta,
+		)
+		if err := db.TrimEventsAboveBlockAndSetCursor(ctx, s.pool, s.cfg.StateKey, safeHead); err != nil {
+			return fmt.Errorf("reconcile cursor to safe head: %w", err)
+		}
+		cursor = safeHead
+		trimmedCursor = true
+	}
+
+	if trimmedCursor {
+		from, to := rewindRangeToSafeHead(safeHead, s.cfg.ReorgWindow)
+		slog.Info("resyncing rewind window after cursor trim", "from", from, "to", to)
+		if err := s.indexRange(ctx, from, to); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	from, to, ok := s.planScanRange(cursor, hasCursor, safeHead)
+	if !ok {
+		slog.Debug("indexer idle", "safe_head", safeHead, "cursor", cursor, "has_cursor", hasCursor)
+		return nil
+	}
+
+	initialBackfill := !hasCursor
+	if initialBackfill {
+		slog.Info("starting historical backfill", "from", from, "to", to)
+	}
+
+	totalBlocks := to - from + 1
+	processedBlocks := uint64(0)
+	batchIndex := uint64(0)
+
+	for batchFrom := from; batchFrom <= to; {
+		batchTo := batchFrom + s.cfg.BatchSize - 1
+		if batchTo > to || batchTo < batchFrom {
+			batchTo = to
+		}
+		batchIndex++
+
+		if err := s.indexRange(ctx, batchFrom, batchTo); err != nil {
+			return err
+		}
+
+		if initialBackfill {
+			processedBlocks += batchTo - batchFrom + 1
+			remainingBlocks := totalBlocks - processedBlocks
+			if remainingBlocks == 0 {
+				slog.Info(
+					"historical backfill complete",
+					"batches",
+					batchIndex,
+					"processed_blocks",
+					processedBlocks,
+					"total_blocks",
+					totalBlocks,
+				)
+			} else {
+				slog.Debug(
+					"historical backfill progress",
+					"batch",
+					batchIndex,
+					"processed_blocks",
+					processedBlocks,
+					"total_blocks",
+					totalBlocks,
+					"remaining_blocks",
+					remainingBlocks,
+				)
+			}
+		}
+
+		if batchTo == to {
+			break
+		}
+		batchFrom = batchTo + 1
+	}
+
+	return nil
+}
+
+func (s *Service) safeHead(ctx context.Context) (uint64, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+
+	latest, err := s.rpc.latestBlockNumber(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if latest < s.cfg.Confirmations {
+		return 0, false, nil
+	}
+
+	return latest - s.cfg.Confirmations, true, nil
+}
+
+func rewindRangeToSafeHead(safeHead uint64, reorgWindow uint64) (uint64, uint64) {
+	if safeHead > reorgWindow {
+		return safeHead - reorgWindow, safeHead
+	}
+	return 0, safeHead
+}
+
+func (s *Service) planScanRange(cursor uint64, hasCursor bool, safeHead uint64) (uint64, uint64, bool) {
+	var from uint64
+	if hasCursor {
+		if cursor > safeHead {
+			cursor = safeHead
+		}
+		if cursor >= safeHead {
+			return 0, 0, false
+		}
+		if cursor > s.cfg.ReorgWindow {
+			from = cursor - s.cfg.ReorgWindow
+		} else {
+			from = 0
+		}
+	} else if s.cfg.HasStartBlock {
+		from = s.cfg.StartBlock
+	} else {
+		return 0, 0, false
+	}
+
+	if from > safeHead {
+		return 0, 0, false
+	}
+
+	return from, safeHead, true
+}
+
+func (s *Service) validateInitialBackfillConfig(hasCursor bool) error {
+	if hasCursor {
+		return nil
+	}
+	if s.cfg.HasStartBlock {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%w: INDEXER_START_BLOCK is required on first run when no cursor exists",
+		errInitialBackfillStartBlockRequired,
+	)
+}
+
+func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+	if fromBlock > toBlock {
+		return fmt.Errorf("invalid block range: from %d > to %d", fromBlock, toBlock)
+	}
+
+	if err := s.indexRangeAttempt(ctx, fromBlock, toBlock); err != nil {
+		if isRPCResponseTooLarge(err) && fromBlock < toBlock {
+			mid := fromBlock + (toBlock-fromBlock)/2
+			if err := s.indexRange(ctx, fromBlock, mid); err != nil {
+				return err
+			}
+			return s.indexRange(ctx, mid+1, toBlock)
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlock uint64) error {
+	logs, err := s.rpc.getLogs(
+		ctx,
+		s.entryPoint,
+		[]string{
+			userOperationEventTopic,
+			accountDeployedTopic,
+			userOperationRevertReasonTopic,
+		},
+		fromBlock,
+		toBlock,
+	)
+	if err != nil {
+		return fmt.Errorf("fetch logs [%d,%d]: %w", fromBlock, toBlock, err)
+	}
+
+	// Filter out removed logs; group by topic0 so we can dispatch each to its
+	// specialized decoder and enrich UserOps in-memory before broadcast.
+	var (
+		activeUserOpLogs []rpcLog
+		activeDeployLogs []rpcLog
+		activeRevertLogs []rpcLog
+	)
+	for i := range logs {
+		if logs[i].Removed {
+			continue
+		}
+		if len(logs[i].Topics) == 0 {
+			continue
+		}
+		switch strings.ToLower(logs[i].Topics[0]) {
+		case userOperationEventTopic:
+			activeUserOpLogs = append(activeUserOpLogs, logs[i])
+		case accountDeployedTopic:
+			activeDeployLogs = append(activeDeployLogs, logs[i])
+		case userOperationRevertReasonTopic:
+			activeRevertLogs = append(activeRevertLogs, logs[i])
+		default:
+			// Unknown topic — ignore. Should not happen given the RPC filter
+			// but defensive against provider bugs.
+			slog.Warn("unknown log topic from eth_getLogs", "topic0", logs[i].Topics[0])
+		}
+	}
+
+	// Collect all logs that need tx metadata / block timestamps.
+	allActive := make([]rpcLog, 0, len(activeUserOpLogs)+len(activeDeployLogs)+len(activeRevertLogs))
+	allActive = append(allActive, activeUserOpLogs...)
+	allActive = append(allActive, activeDeployLogs...)
+	allActive = append(allActive, activeRevertLogs...)
+
+	txMetaByHash := make(map[string]map[string][]operationMeta)
+	blockTimestamps := make(map[uint64]int64)
+	if len(allActive) > 0 {
+		if s.cfg.EnableTxEnrichment {
+			// Only UserOp logs need tx metadata enrichment (target / calldata).
+			// The other two event types don't use the per-op target lookup, so
+			// we narrow the tx-fetch set to the UserOp logs to avoid wasting RPC.
+			txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeUserOpLogs)
+			if err != nil {
+				return fmt.Errorf("load transaction metadata: %w", err)
+			}
+		}
+
+		// Block timestamps are needed for all three event types.
+		blockTimestamps, err = s.loadBlockTimestamps(ctx, allActive)
+		if err != nil {
+			return fmt.Errorf("load block timestamps: %w", err)
+		}
+	}
+
+	operations := make([]db.UserOperation, 0, len(activeUserOpLogs))
+	for i := range activeUserOpLogs {
+		log := activeUserOpLogs[i]
+
+		event, err := decodeUserOperationEventLog(log)
+		if err != nil {
+			return fmt.Errorf(
+				"decode user operation event tx %s block %s log_index %s: %w",
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
+			)
+		}
+
+		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
+		if !ok {
+			return fmt.Errorf("missing timestamp for block %d", event.BlockNumber)
+		}
+
+		meta := popOperationMeta(txMetaByHash, event.TxHashHex, event.Sender, event.Nonce)
+
+		blockNumberInt64, err := toInt64(event.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("convert block number %d: %w", event.BlockNumber, err)
+		}
+
+		operations = append(operations, db.UserOperation{
+			UserOpHash:     event.UserOpHash,
+			Sender:         event.Sender,
+			Paymaster:      event.Paymaster,
+			Target:         meta.Target,
+			Calldata:       meta.Calldata,
+			Nonce:          event.Nonce,
+			Success:        event.Success,
+			ActualGasCost:  event.ActualGasCost,
+			ActualGasUsed:  event.ActualGasUsed,
+			TxHash:         event.TxHash,
+			BlockNumber:    blockNumberInt64,
+			BlockTimestamp: blockTimestamp,
+			LogIndex:       event.LogIndex,
+		})
+	}
+
+	deployments := make([]db.AccountDeployment, 0, len(activeDeployLogs))
+	for i := range activeDeployLogs {
+		log := activeDeployLogs[i]
+
+		event, err := decodeAccountDeployedLog(log)
+		if err != nil {
+			return fmt.Errorf(
+				"decode account deployed event tx %s block %s log_index %s: %w",
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
+			)
+		}
+
+		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
+		if !ok {
+			return fmt.Errorf("missing timestamp for block %d", event.BlockNumber)
+		}
+
+		blockNumberInt64, err := toInt64(event.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("convert block number %d: %w", event.BlockNumber, err)
+		}
+
+		deployments = append(deployments, db.AccountDeployment{
+			UserOpHash:     event.UserOpHash,
+			Sender:         event.Sender,
+			Factory:        event.Factory,
+			Paymaster:      event.Paymaster,
+			TxHash:         event.TxHash,
+			BlockNumber:    blockNumberInt64,
+			BlockTimestamp: blockTimestamp,
+			LogIndex:       event.LogIndex,
+		})
+	}
+
+	reverts := make([]db.UserOperationRevert, 0, len(activeRevertLogs))
+	for i := range activeRevertLogs {
+		log := activeRevertLogs[i]
+
+		event, err := decodeUserOperationRevertReasonLog(log)
+		if err != nil {
+			return fmt.Errorf(
+				"decode user operation revert reason event tx %s block %s log_index %s: %w",
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
+			)
+		}
+
+		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
+		if !ok {
+			return fmt.Errorf("missing timestamp for block %d", event.BlockNumber)
+		}
+
+		blockNumberInt64, err := toInt64(event.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("convert block number %d: %w", event.BlockNumber, err)
+		}
+
+		reverts = append(reverts, db.UserOperationRevert{
+			UserOpHash:     event.UserOpHash,
+			Sender:         event.Sender,
+			Nonce:          event.Nonce,
+			RevertReason:   event.RevertReason,
+			TxHash:         event.TxHash,
+			BlockNumber:    blockNumberInt64,
+			BlockTimestamp: blockTimestamp,
+			LogIndex:       event.LogIndex,
+		})
+	}
+
+	// Enrichment pass: join deployments and reverts onto UserOperations by
+	// user_op_hash so the broadcast payload already carries the denormalized
+	// fields. Map keys are the raw 32-byte hash stringified (string([]byte) —
+	// the canonical Go pattern for byte-slice keys), giving byte-equality
+	// lookup without the cost of hex encoding.
+	if len(operations) > 0 && (len(deployments) > 0 || len(reverts) > 0) {
+		deployedByHash := make(map[string]struct{}, len(deployments))
+		for i := range deployments {
+			deployedByHash[string(deployments[i].UserOpHash)] = struct{}{}
+		}
+		revertByHash := make(map[string][]byte, len(reverts))
+		for i := range reverts {
+			revertByHash[string(reverts[i].UserOpHash)] = reverts[i].RevertReason
+		}
+		for i := range operations {
+			key := string(operations[i].UserOpHash)
+			if _, ok := deployedByHash[key]; ok {
+				operations[i].AccountDeployed = true
+			}
+			if reason, ok := revertByHash[key]; ok {
+				operations[i].RevertReason = reason
+			}
+		}
+	}
+
+	if err := db.ReplaceEventsAndSetCursor(
+		ctx,
+		s.pool,
+		s.cfg.StateKey,
+		fromBlock,
+		toBlock,
+		toBlock,
+		operations,
+		deployments,
+		reverts,
+	); err != nil {
+		return fmt.Errorf("persist range [%d,%d]: %w", fromBlock, toBlock, err)
+	}
+
+	slog.Info(
+		"indexed block range",
+		"from", fromBlock,
+		"to", toBlock,
+		"user_ops", len(operations),
+		"deployments", len(deployments),
+		"reverts", len(reverts),
+	)
+
+	if len(operations) > 0 && s.OnOperationsIndexed != nil {
+		s.OnOperationsIndexed(operations)
+	}
+
+	return nil
+}
+
+func (s *Service) loadTransactionOperationMeta(ctx context.Context, logs []rpcLog) (map[string]map[string][]operationMeta, error) {
+	result := make(map[string]map[string][]operationMeta)
+
+	txHashes := make(map[string]string)
+	for i := range logs {
+		log := logs[i]
+		normalizedTxHash := strings.ToLower(log.TransactionHash)
+		if _, exists := txHashes[normalizedTxHash]; exists {
+			continue
+		}
+		txHashes[normalizedTxHash] = log.TransactionHash
+	}
+
+	type txJob struct {
+		normalizedHash string
+		rawHash        string
+	}
+
+	workerCount := s.cfg.RPCConcurrency
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > len(txHashes) {
+		workerCount = len(txHashes)
+	}
+	if workerCount == 0 {
+		return result, nil
+	}
+
+	jobs := make(chan txJob)
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	setErr := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
+		cancel()
+	}
+
+	worker := func() {
+		defer wg.Done()
+		for job := range jobs {
+			if workerCtx.Err() != nil {
+				return
+			}
+
+			tx, err := s.rpc.getTransactionByHash(workerCtx, job.rawHash)
+			if err != nil {
+				setErr(fmt.Errorf("load tx %s: %w", job.rawHash, err))
+				return
+			}
+
+			input, err := decodeHex(tx.Input)
+			if err != nil {
+				setErr(fmt.Errorf("decode tx input %s: %w", tx.Hash, err))
+				return
+			}
+
+			calls, err := decodeHandleOpsInput(input)
+			if err != nil {
+				slog.Debug("transaction input not handleOps or undecodable", "tx_hash", tx.Hash, "err", err)
+				mu.Lock()
+				result[job.normalizedHash] = map[string][]operationMeta{}
+				mu.Unlock()
+				continue
+			}
+
+			mu.Lock()
+			result[job.normalizedHash] = toOperationMetaQueue(calls)
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go worker()
+	}
+
+enqueue:
+	for normalizedHash, rawHash := range txHashes {
+		select {
+		case <-workerCtx.Done():
+			break enqueue
+		case jobs <- txJob{normalizedHash: normalizedHash, rawHash: rawHash}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	return result, nil
+}
+
+func (s *Service) loadBlockTimestamps(ctx context.Context, logs []rpcLog) (map[uint64]int64, error) {
+	result := make(map[uint64]int64)
+	uniqueBlocks := make(map[uint64]struct{})
+	for i := range logs {
+		log := logs[i]
+		blockNumber, err := parseHexUint64(log.BlockNumber)
+		if err != nil {
+			return nil, fmt.Errorf("parse block number %q: %w", log.BlockNumber, err)
+		}
+		uniqueBlocks[blockNumber] = struct{}{}
+	}
+
+	missingBlocks := make([]uint64, 0, len(uniqueBlocks))
+	for blockNumber := range uniqueBlocks {
+		if timestamp, ok := s.getCachedBlockTimestamp(blockNumber); ok {
+			result[blockNumber] = timestamp
+			continue
+		}
+		missingBlocks = append(missingBlocks, blockNumber)
+	}
+
+	if len(missingBlocks) == 0 {
+		return result, nil
+	}
+
+	type blockJob struct {
+		blockNumber uint64
+	}
+
+	workerCount := s.cfg.RPCConcurrency
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > len(missingBlocks) {
+		workerCount = len(missingBlocks)
+	}
+
+	jobs := make(chan blockJob)
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	fetched := make(map[uint64]int64, len(missingBlocks))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
+	setErr := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr != nil {
+			return
+		}
+		firstErr = err
+		cancel()
+	}
+
+	worker := func() {
+		defer wg.Done()
+		for job := range jobs {
+			if workerCtx.Err() != nil {
+				return
+			}
+
+			block, err := s.rpc.getBlockByNumber(workerCtx, job.blockNumber)
+			if err != nil {
+				setErr(fmt.Errorf("load block %d: %w", job.blockNumber, err))
+				return
+			}
+
+			timestampUint, err := parseHexUint64(block.Timestamp)
+			if err != nil {
+				setErr(fmt.Errorf("parse block %d timestamp %q: %w", job.blockNumber, block.Timestamp, err))
+				return
+			}
+			timestampInt64, err := toInt64(timestampUint)
+			if err != nil {
+				setErr(fmt.Errorf("convert block %d timestamp %d: %w", job.blockNumber, timestampUint, err))
+				return
+			}
+
+			mu.Lock()
+			fetched[job.blockNumber] = timestampInt64
+			mu.Unlock()
+		}
+	}
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go worker()
+	}
+
+enqueue:
+	for i := range missingBlocks {
+		select {
+		case <-workerCtx.Done():
+			break enqueue
+		case jobs <- blockJob{blockNumber: missingBlocks[i]}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	s.storeBlockTimestamps(fetched)
+	for blockNumber, timestamp := range fetched {
+		result[blockNumber] = timestamp
+	}
+
+	return result, nil
+}
+
+func (s *Service) getCachedBlockTimestamp(blockNumber uint64) (int64, bool) {
+	s.cacheMu.RLock()
+	defer s.cacheMu.RUnlock()
+
+	timestamp, ok := s.blockTimestampCache[blockNumber]
+	return timestamp, ok
+}
+
+func (s *Service) storeBlockTimestamps(values map[uint64]int64) {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	for blockNumber, timestamp := range values {
+		s.blockTimestampCache[blockNumber] = timestamp
+	}
+
+	if len(s.blockTimestampCache) <= blockTimestampCacheMaxEntries {
+		return
+	}
+
+	keys := make([]uint64, 0, len(s.blockTimestampCache))
+	for blockNumber := range s.blockTimestampCache {
+		keys = append(keys, blockNumber)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+
+	toRemove := len(s.blockTimestampCache) - blockTimestampCacheMaxEntries
+	for i := 0; i < toRemove; i++ {
+		delete(s.blockTimestampCache, keys[i])
+	}
+}
+
+func popOperationMeta(
+	txMetaByHash map[string]map[string][]operationMeta,
+	txHash string,
+	sender []byte,
+	nonce string,
+) operationMeta {
+	txMeta, ok := txMetaByHash[txHash]
+	if !ok {
+		return operationMeta{}
+	}
+
+	key := operationKey(sender, nonce)
+	queue := txMeta[key]
+	if len(queue) == 0 {
+		return operationMeta{}
+	}
+
+	meta := queue[0]
+	if len(queue) == 1 {
+		delete(txMeta, key)
+	} else {
+		txMeta[key] = queue[1:]
+	}
+
+	return meta
+}

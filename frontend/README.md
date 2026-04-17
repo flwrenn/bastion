@@ -1,42 +1,19 @@
-# sv
+# Bastion — Frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit 2 app (Svelte 5 runes, Tailwind, viem, `permissionless.js`) shared between the smart-account and indexer flows.
 
-## Creating a project
+For setup, demo walkthrough, and architecture notes, see the **[root README](../README.md)**.
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+## Commands
 
 ```sh
-# recreate this project
-pnpm dlx sv@0.12.4 create --template minimal --types ts --add prettier eslint tailwindcss="plugins:none" --install pnpm apps/frontend
+pnpm install    # install dependencies
+pnpm dev        # dev server on http://localhost:5173
+pnpm build      # production build
+pnpm preview    # preview the production build
+pnpm lint       # ESLint + Prettier check
 ```
 
-## Developing
+## Environment
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Copy [`.env.example`](./.env.example) to `.env`. `PUBLIC_PIMLICO_API_KEY` is required; `PUBLIC_INDEXER_URL` defaults to `http://localhost:3001`. The `PUBLIC_*_ADDRESS` values are optional — the app falls back to the committed Sepolia addresses in `src/lib/contracts/addresses.ts`. See [Quick Start](../README.md#quick-start) in the root README for details. After a redeploy, `make export-addresses` (run from the repo root) regenerates `addresses.ts` from `contracts/deployments/<chainId>.json`.
