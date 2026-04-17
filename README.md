@@ -28,7 +28,16 @@ Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2 (Svelte 5, viem,
 
 ## Quick Start
 
-Get from clone to all services running against Sepolia in under 10 minutes.
+Get from clone to all services running against Sepolia in under 10 minutes. First install the tools in [Prerequisites](#prerequisites) (Foundry, Node + pnpm, Go, Docker or a local Postgres, and `jq`).
+
+### 0. From a fresh clone
+
+```sh
+git submodule update --init --recursive   # forge-std, OZ, account-abstraction, solady
+cd frontend && pnpm install && cd ..
+```
+
+Skip this step only if the submodules are already populated and `frontend/node_modules/` exists.
 
 ### 1. Root env
 
@@ -94,7 +103,7 @@ bastion/
 - [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
 - [Node.js](https://nodejs.org/) v20+ and [pnpm](https://pnpm.io/) v9+
 - [Go](https://go.dev/) 1.25+
-- [PostgreSQL](https://www.postgresql.org/) 15+ — the bundled `make db-up` runs it via Docker so host-level install is optional
+- [Docker](https://docs.docker.com/get-docker/) + Compose v2 — required for `make db-up`; alternatively, use a host-level [PostgreSQL](https://www.postgresql.org/) 15+ and set `DATABASE_URL` yourself
 
 Optional for tooling scripts:
 
