@@ -6,7 +6,7 @@ Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2 (Svelte 5, viem,
 
 ## Architecture
 
-```
+```text
 ┌──────────────┐     UserOps      ┌─────────────┐     handleOps     ┌────────────┐
 │   Frontend   │ ───────────────► │   Bundler   │ ────────────────► │ EntryPoint │
 │  (SvelteKit) │                  │  (Pimlico)  │                   │   (v0.7)   │
@@ -73,7 +73,7 @@ Running a fresh deployment is **not** required — the Sepolia addresses in the 
 
 ## Directory Structure
 
-```
+```text
 bastion/
 ├── contracts/          # Foundry — Solidity sources, tests, deploy scripts
 │   ├── src/            # Contract source files
