@@ -177,3 +177,42 @@ All four project contracts are deployed and verified on Sepolia. Addresses come 
 | `FaucetToken` (`BFT`) | `0x7EFb41d61f894e787405c5D7E114dB86542adafF` | [View](https://sepolia.etherscan.io/address/0x7EFb41d61f894e787405c5D7E114dB86542adafF#code) |
 
 > The `SmartAccount` entry is the implementation contract behind every proxy the factory deploys; per-user accounts are deterministic CREATE2 addresses derived from `(owner, salt)` and are counterfactual until first UserOp.
+
+## Demo Walkthrough
+
+End-to-end flow an evaluator can reproduce in ~5 minutes after completing [Quick Start](#quick-start). Every UserOp below is sponsored by the Pimlico paymaster — **no Sepolia ETH required** in the connecting wallet.
+
+### Prerequisites
+
+- Browser wallet (MetaMask, Rabby, …) with any Sepolia-capable account. No funding required.
+- A Pimlico API key with paymaster sponsorship enabled (free tier is sufficient).
+- Indexer, frontend, and Postgres running locally (Quick Start covers this).
+
+### Steps
+
+1. **Open `http://localhost:5173/` and connect your wallet.** The app issues `wallet_switchEthereumChain` to Sepolia automatically — approve if prompted.
+
+2. **Observe the counterfactual SmartAccount address.** Derived via `SmartAccountFactory.getAddress(owner, 0)`. An `eth_getCode` call returns `0x`, confirming the account has not been deployed yet — this is an important property of ERC-4337: the address is usable before deployment.
+
+3. **Click *Deploy Account*.** The frontend submits a sponsored no-op UserOp with `initCode` set to the factory + `createAccount` calldata. The EntryPoint deploys the proxy in the same transaction that runs `validateUserOp`. Post-deploy, `getCode` returns non-empty bytecode. The Jiffyscan link in the success toast shows the UserOp lifecycle (validation → deploy → execute).
+
+4. **Open the Counter card, click *Increment*.** Encoded as `SmartAccount.execute(counter, 0, abi.encodeCall(Counter.increment, ()))`, signed by the owner, sponsored by Pimlico. `Counter.getCount(smartAccount)` reflects the new value. The `UserOperationEvent` emitted by the EntryPoint appears in the indexer feed (step 11) within one poll cycle.
+
+5. **Open the Faucet card, click *Claim Tokens*.** Same pattern, targeting `FaucetToken.claim()`. The card refreshes the connecting wallet's `BFT` balance after the UserOp lands. Useful as a second sponsored owner-flow data point before moving to session keys.
+
+6. **Open *Session Keys*, click *Generate*.** The browser creates a fresh secp256k1 keypair entirely in memory — the private key never leaves the page and is **not** persisted. Pick:
+   - **Target:** `Counter` or `FaucetToken`
+   - **Selector:** one of `increment()`, `claim()`, or `transfer(address,uint256)`
+   - **Valid window:** `validAfter` / `validUntil` (UNIX seconds)
+
+7. **Click *Register*.** The frontend submits an owner-signed UserOp whose inner `execute` call targets the SmartAccount itself and invokes `registerSessionKey(publicKey, target, selector, validAfter, validUntil)`. Emits `SessionKeyAdded`. **Copy the session-key private key now** — it only exists in browser memory; a page reload loses it forever.
+
+8. **Open `http://localhost:5173/session` in a new tab.** Paste the SmartAccount address and the session-key private key, click *Load*. The page reads `sessionKeys(publicKey)` on-chain to verify scope (target, selector, window) and cross-checks that the caller's public key matches.
+
+9. **In the Permissions card, click *Execute*.** The session-key-flow helper signs a UserOp locally with the session-key private key (never prompting the wallet), submits it through Pimlico's bundler, and the paymaster sponsors gas. The SmartAccount's `validateUserOp` walks into `_validateSessionKey`, which checks signer ∈ active session keys, inner call target matches `target`, 4-byte selector matches `selector`, and `block.timestamp ∈ [validAfter, validUntil]`. Jiffyscan + Etherscan links appear on success.
+
+10. **Return to the first tab, click *Revoke* on the session key.** Owner-signed UserOp calling `revokeSessionKey(publicKey)`. Emits `SessionKeyRevoked`. Re-running step 9 now fails at `validateUserOp` — the EntryPoint surfaces `SIG_VALIDATION_FAILED` and the bundler rejects the op.
+
+11. **Open `http://localhost:5173/indexer`.** The WebSocket feed streams every `UserOperationEvent` from the demo in order. The stats panel shows total ops, success rate, sponsored-% (should be 100% — paymaster covered all ops), and unique senders. Etherscan links on each row let the evaluator cross-check the on-chain transaction.
+
+12. **(Optional) Observe reorg resilience.** Kill the indexer mid-demo (`Ctrl-C` on `make indexer-dev` / `make dev`) and restart it. On boot it resumes from the persisted cursor and rewinds `INDEXER_REORG_WINDOW` blocks to re-index anything that might have reorged in that window. The feed catches back up without double-counting — atomic `ReplaceOperationsAndSetCursor` deletes the rewound range and re-inserts in one transaction.
