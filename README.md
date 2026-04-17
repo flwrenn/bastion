@@ -94,7 +94,11 @@ bastion/
 - [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
 - [Node.js](https://nodejs.org/) v20+ and [pnpm](https://pnpm.io/) v9+
 - [Go](https://go.dev/) 1.25+
-- [PostgreSQL](https://www.postgresql.org/) 15+
+- [PostgreSQL](https://www.postgresql.org/) 15+ — the bundled `make db-up` runs it via Docker so host-level install is optional
+
+Optional for tooling scripts:
+
+- [`jq`](https://jqlang.org/) — used by `make export-abis` and `make export-addresses` to parse Forge JSON. Install with `brew install jq` (macOS) or `apt install jq` (Debian/Ubuntu). The scripts fail fast with an install hint if it is missing.
 
 ## Setup
 
