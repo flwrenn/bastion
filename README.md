@@ -158,9 +158,22 @@ make test     # Run all test suites
 
 | Contract | Description | Status |
 |----------|-------------|--------|
-| `SmartAccount` | ERC-4337 account — ECDSA owner validation, `execute`/`executeBatch`, proxy-compatible | Implemented |
-| `SmartAccountFactory` | CREATE2 deployment of SmartAccount proxies | Not started |
-| `Counter` | Scaffold — needs rewrite to per-account spec (`getCount(address)`) | Scaffold |
-| `FaucetToken` | ERC-20 with `claim()` faucet | Not started |
+| `SmartAccount` | ERC-4337 account — ECDSA owner validation, session keys, `execute`/`executeBatch`, proxy-compatible via `Initializable` | Implemented |
+| `SmartAccountFactory` | CREATE2 deployment of SmartAccount proxies; `createAccount(owner, salt)` and `getAddress(owner, salt)` | Implemented |
+| `Counter` | Demo target — per-account counters, `increment()` and `getCount(address)` | Implemented |
+| `FaucetToken` | ERC-20 (symbol `BFT`) with `claim()` faucet mint | Implemented |
 
-**EntryPoint v0.7:** `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
+**EntryPoint v0.7 (external, canonical):** [`0x0000000071727De22E5E9d8BAf0edAc6f37da032`](https://sepolia.etherscan.io/address/0x0000000071727De22E5E9d8BAf0edAc6f37da032)
+
+### Deployed on Sepolia
+
+All four project contracts are deployed and verified on Sepolia. Addresses come from [`contracts/deployments/11155111.json`](contracts/deployments/11155111.json) — re-run `make export-addresses` after a redeploy to sync them into `frontend/src/lib/contracts/addresses.ts`.
+
+| Contract | Address | Etherscan |
+|----------|---------|-----------|
+| `SmartAccountFactory` | `0x903794183FB881FC78dCA8c9CEB63EC7F10BD5Fd` | [View](https://sepolia.etherscan.io/address/0x903794183FB881FC78dCA8c9CEB63EC7F10BD5Fd#code) |
+| `SmartAccount` (implementation) | `0x436365cBED02eFBf3F7adb3Da35FbA8098A94a52` | [View](https://sepolia.etherscan.io/address/0x436365cBED02eFBf3F7adb3Da35FbA8098A94a52#code) |
+| `Counter` | `0x1bFe2EE14a1AFac835bB4C3Dc61d8f3520335e94` | [View](https://sepolia.etherscan.io/address/0x1bFe2EE14a1AFac835bB4C3Dc61d8f3520335e94#code) |
+| `FaucetToken` (`BFT`) | `0x7EFb41d61f894e787405c5D7E114dB86542adafF` | [View](https://sepolia.etherscan.io/address/0x7EFb41d61f894e787405c5D7E114dB86542adafF#code) |
+
+> The `SmartAccount` entry is the implementation contract behind every proxy the factory deploys; per-user accounts are deterministic CREATE2 addresses derived from `(owner, salt)` and are counterfactual until first UserOp.
