@@ -139,6 +139,134 @@ func TestDecodeHandleOpsInputRejectsTupleOffsetOutOfBounds(t *testing.T) {
 	}
 }
 
+func TestDecodeAccountDeployedLog(t *testing.T) {
+	t.Parallel()
+
+	factory := mustAddressBytes("00000000000000000000000000000000000000ff")
+	paymaster := mustAddressBytes("00000000000000000000000000000000000000aa")
+
+	log := rpcLog{
+		Topics: []string{
+			accountDeployedTopic,
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			"0x0000000000000000000000001111111111111111111111111111111111111111",
+		},
+		Data:            "0x" + hex.EncodeToString(addressWord(factory)) + hex.EncodeToString(addressWord(paymaster)),
+		TransactionHash: "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		BlockNumber:     "0x42",
+		LogIndex:        "0x3",
+	}
+
+	decoded, err := decodeAccountDeployedLog(log)
+	if err != nil {
+		t.Fatalf("decodeAccountDeployedLog returned error: %v", err)
+	}
+
+	if hex.EncodeToString(decoded.UserOpHash) != "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" {
+		t.Fatalf("unexpected userOpHash: %x", decoded.UserOpHash)
+	}
+	if hex.EncodeToString(decoded.Sender) != "1111111111111111111111111111111111111111" {
+		t.Fatalf("unexpected sender: %x", decoded.Sender)
+	}
+	if !bytes.Equal(decoded.Factory, factory) {
+		t.Fatalf("unexpected factory: %x", decoded.Factory)
+	}
+	if !bytes.Equal(decoded.Paymaster, paymaster) {
+		t.Fatalf("unexpected paymaster: %x", decoded.Paymaster)
+	}
+	if decoded.BlockNumber != 0x42 {
+		t.Fatalf("expected block number 0x42, got %d", decoded.BlockNumber)
+	}
+	if decoded.LogIndex != 3 {
+		t.Fatalf("expected log index 3, got %d", decoded.LogIndex)
+	}
+}
+
+func TestDecodeAccountDeployedLogRejectsWrongTopicCount(t *testing.T) {
+	t.Parallel()
+
+	log := rpcLog{
+		Topics: []string{accountDeployedTopic, "0x00"},
+	}
+	if _, err := decodeAccountDeployedLog(log); err == nil {
+		t.Fatal("expected topic-count error")
+	}
+}
+
+func TestDecodeUserOperationRevertReasonLog(t *testing.T) {
+	t.Parallel()
+
+	// revert reason = UTF-8 "boom"
+	reason := []byte("boom")
+	reasonEncoded := encodeBytes(reason) // length word + padded bytes
+
+	// data layout: nonce (word) + offset (word) + dynamic bytes
+	data := make([]byte, 0, 64+len(reasonEncoded))
+	data = append(data, uintWord(7)...)  // nonce = 7
+	data = append(data, uintWord(64)...) // offset = 64 (skip nonce + offset words)
+	data = append(data, reasonEncoded...)
+
+	log := rpcLog{
+		Topics: []string{
+			userOperationRevertReasonTopic,
+			"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			"0x0000000000000000000000002222222222222222222222222222222222222222",
+		},
+		Data:            "0x" + hex.EncodeToString(data),
+		TransactionHash: "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		BlockNumber:     "0x100",
+		LogIndex:        "0x5",
+	}
+
+	decoded, err := decodeUserOperationRevertReasonLog(log)
+	if err != nil {
+		t.Fatalf("decodeUserOperationRevertReasonLog returned error: %v", err)
+	}
+
+	if decoded.Nonce != "7" {
+		t.Fatalf("expected nonce 7, got %s", decoded.Nonce)
+	}
+	if !bytes.Equal(decoded.RevertReason, reason) {
+		t.Fatalf("unexpected revert reason: %x", decoded.RevertReason)
+	}
+	if decoded.BlockNumber != 0x100 {
+		t.Fatalf("expected block number 0x100, got %d", decoded.BlockNumber)
+	}
+	if decoded.LogIndex != 5 {
+		t.Fatalf("expected log index 5, got %d", decoded.LogIndex)
+	}
+}
+
+func TestDecodeUserOperationRevertReasonLogAcceptsEmptyBytes(t *testing.T) {
+	t.Parallel()
+
+	// Empty revertReason: length word = 0, no padding bytes.
+	data := make([]byte, 0, 64+32)
+	data = append(data, uintWord(0)...)  // nonce
+	data = append(data, uintWord(64)...) // offset
+	data = append(data, uintWord(0)...)  // bytes length = 0
+
+	log := rpcLog{
+		Topics: []string{
+			userOperationRevertReasonTopic,
+			"0x0000000000000000000000000000000000000000000000000000000000000001",
+			"0x0000000000000000000000002222222222222222222222222222222222222222",
+		},
+		Data:            "0x" + hex.EncodeToString(data),
+		TransactionHash: "0x0000000000000000000000000000000000000000000000000000000000000001",
+		BlockNumber:     "0x1",
+		LogIndex:        "0x0",
+	}
+
+	decoded, err := decodeUserOperationRevertReasonLog(log)
+	if err != nil {
+		t.Fatalf("unexpected error for empty revert reason: %v", err)
+	}
+	if len(decoded.RevertReason) != 0 {
+		t.Fatalf("expected empty revert reason, got %x", decoded.RevertReason)
+	}
+}
+
 func hexWord(value uint64) string {
 	return fmt.Sprintf("%064x", value)
 }
