@@ -12,7 +12,7 @@
 	}
 </script>
 
-<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+<div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-5">
 	<!-- Total UserOps -->
 	<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-4">
 		<p class="text-xs tracking-wider text-zinc-400 uppercase">Total UserOps</p>
@@ -63,6 +63,14 @@
 				{stats.sponsoredCount} paymaster-funded
 			</p>
 		{/if}
+	</div>
+
+	<!-- Accounts Deployed -->
+	<div class="rounded-lg border border-zinc-800 bg-zinc-800/50 px-4 py-4">
+		<p class="text-xs tracking-wider text-zinc-400 uppercase">Accounts Deployed</p>
+		<p class="mt-1 text-2xl font-semibold tabular-nums">
+			{stats ? stats.accountsDeployedCount.toLocaleString() : '\u2014'}
+		</p>
 	</div>
 
 	<!-- Unique Senders -->
