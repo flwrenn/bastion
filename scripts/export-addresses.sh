@@ -7,6 +7,12 @@ set -euo pipefail
 # Usage: ./scripts/export-addresses.sh [chain_id]
 #   chain_id defaults to 11155111 (Sepolia)
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but not installed." >&2
+  echo "install with: brew install jq  (macOS)  |  apt install jq  (Debian/Ubuntu)" >&2
+  exit 1
+fi
+
 CHAIN_ID="${1:-11155111}"
 DEPLOY_JSON="contracts/deployments/${CHAIN_ID}.json"
 FRONTEND_DIR="frontend/src/lib/contracts"

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "error: jq is required but not installed." >&2
+  echo "install with: brew install jq  (macOS)  |  apt install jq  (Debian/Ubuntu)" >&2
+  exit 1
+fi
+
 CONTRACTS_OUT="contracts/out"
 FRONTEND_ABIS="frontend/src/lib/contracts"
 
