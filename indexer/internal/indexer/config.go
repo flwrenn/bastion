@@ -22,6 +22,10 @@ const (
 	defaultRPCRetryBaseDelay = 500 * time.Millisecond
 	defaultRPCRetryMaxDelay  = 30 * time.Second
 
+	// maxRPCMaxRetries caps retries to prevent long shutdown stalls and keep
+	// backoff exponent within safe bounds.
+	maxRPCMaxRetries = 20
+
 	stateKeyLastIndexedBlock = "user_operations.last_indexed_block"
 )
 
@@ -173,8 +177,8 @@ func LoadConfigFromEnv() (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("parse INDEXER_RPC_MAX_RETRIES: %w", err)
 		}
-		if maxRetries <= 0 || maxRetries > 20 {
-			return Config{}, fmt.Errorf("INDEXER_RPC_MAX_RETRIES must be between 1 and 20")
+		if maxRetries <= 0 || maxRetries > maxRPCMaxRetries {
+			return Config{}, fmt.Errorf("INDEXER_RPC_MAX_RETRIES must be between 1 and %d", maxRPCMaxRetries)
 		}
 		cfg.RPCMaxRetries = maxRetries
 	}
@@ -199,6 +203,14 @@ func LoadConfigFromEnv() (Config, error) {
 			return Config{}, fmt.Errorf("INDEXER_RPC_RETRY_MAX_DELAY must be greater than 0")
 		}
 		cfg.RPCRetryMaxDelay = maxDelay
+	}
+
+	if cfg.RPCRetryBaseDelay > cfg.RPCRetryMaxDelay {
+		return Config{}, fmt.Errorf(
+			"INDEXER_RPC_RETRY_BASE_DELAY (%s) must not exceed INDEXER_RPC_RETRY_MAX_DELAY (%s)",
+			cfg.RPCRetryBaseDelay,
+			cfg.RPCRetryMaxDelay,
+		)
 	}
 
 	if value := strings.TrimSpace(os.Getenv("INDEXER_ENABLE_TX_ENRICHMENT")); value != "" {

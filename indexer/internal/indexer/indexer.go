@@ -61,11 +61,21 @@ func New(cfg Config, pool *pgxpool.Pool) (*Service, error) {
 	if cfg.RPCMaxRetries <= 0 {
 		return nil, fmt.Errorf("RPCMaxRetries must be greater than 0")
 	}
+	if cfg.RPCMaxRetries > maxRPCMaxRetries {
+		return nil, fmt.Errorf("RPCMaxRetries must be at most %d", maxRPCMaxRetries)
+	}
 	if cfg.RPCRetryBaseDelay <= 0 {
 		return nil, fmt.Errorf("RPCRetryBaseDelay must be greater than 0")
 	}
 	if cfg.RPCRetryMaxDelay <= 0 {
 		return nil, fmt.Errorf("RPCRetryMaxDelay must be greater than 0")
+	}
+	if cfg.RPCRetryBaseDelay > cfg.RPCRetryMaxDelay {
+		return nil, fmt.Errorf(
+			"RPCRetryBaseDelay (%s) must not exceed RPCRetryMaxDelay (%s)",
+			cfg.RPCRetryBaseDelay,
+			cfg.RPCRetryMaxDelay,
+		)
 	}
 	if cfg.StateKey == "" {
 		return nil, fmt.Errorf("StateKey is required")
