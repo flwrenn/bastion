@@ -62,9 +62,9 @@ cp frontend/.env.example frontend/.env
 
 Fill in:
 
-- `PUBLIC_FACTORY_ADDRESS`, `PUBLIC_COUNTER_ADDRESS`, `PUBLIC_FAUCET_TOKEN_ADDRESS` — use the addresses from the [Deployed on Sepolia](#deployed-on-sepolia) table, or run `make export-addresses` after a redeploy to regenerate them automatically
 - `PUBLIC_PIMLICO_API_KEY` — create one at [pimlico.io](https://pimlico.io); the free tier covers the demo
 - `PUBLIC_INDEXER_URL` — leave as `http://localhost:3001`
+- `PUBLIC_FACTORY_ADDRESS`, `PUBLIC_COUNTER_ADDRESS`, `PUBLIC_FAUCET_TOKEN_ADDRESS` — **optional**. The frontend falls back to the committed Sepolia addresses in `frontend/src/lib/contracts/addresses.ts`, so you only need to set these to override (e.g. after your own redeploy). After a redeploy, `make export-addresses` regenerates `addresses.ts` from `contracts/deployments/11155111.json`.
 
 ### 3. Build, then run
 
@@ -180,7 +180,7 @@ make test     # Run all test suites
 
 ### Deployed on Sepolia
 
-All four project contracts are deployed and verified on Sepolia. Addresses come from [`contracts/deployments/11155111.json`](contracts/deployments/11155111.json) — re-run `make export-addresses` after a redeploy to sync them into `frontend/src/lib/contracts/addresses.ts`.
+All four project contracts are deployed and verified on Sepolia. Addresses are committed in [`contracts/deployments/11155111.json`](contracts/deployments/11155111.json) and mirrored to [`frontend/src/lib/contracts/addresses.ts`](frontend/src/lib/contracts/addresses.ts), which the frontend imports as its default — no `PUBLIC_*_ADDRESS` env vars required unless you want to override. After a redeploy, run `make export-addresses` to regenerate `addresses.ts` from the deployments JSON.
 
 | Contract | Address | Etherscan |
 |----------|---------|-----------|
