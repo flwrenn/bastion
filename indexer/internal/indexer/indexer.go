@@ -550,42 +550,69 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		return fmt.Errorf("fetch logs [%d,%d]: %w", fromBlock, toBlock, err)
 	}
 
-	activeLogs := make([]rpcLog, 0, len(logs))
+	// Filter out removed logs; group by topic0 so we can dispatch each to its
+	// specialized decoder and enrich UserOps in-memory before broadcast.
+	var (
+		activeUserOpLogs []rpcLog
+		activeDeployLogs []rpcLog
+		activeRevertLogs []rpcLog
+	)
 	for i := range logs {
 		if logs[i].Removed {
 			continue
 		}
-		activeLogs = append(activeLogs, logs[i])
+		if len(logs[i].Topics) == 0 {
+			continue
+		}
+		switch strings.ToLower(logs[i].Topics[0]) {
+		case userOperationEventTopic:
+			activeUserOpLogs = append(activeUserOpLogs, logs[i])
+		case accountDeployedTopic:
+			activeDeployLogs = append(activeDeployLogs, logs[i])
+		case userOperationRevertReasonTopic:
+			activeRevertLogs = append(activeRevertLogs, logs[i])
+		default:
+			// Unknown topic — ignore. Should not happen given the RPC filter
+			// but defensive against provider bugs.
+			slog.Warn("unknown log topic from eth_getLogs", "topic0", logs[i].Topics[0])
+		}
 	}
+
+	// Collect all logs that need tx metadata / block timestamps.
+	allActive := make([]rpcLog, 0, len(activeUserOpLogs)+len(activeDeployLogs)+len(activeRevertLogs))
+	allActive = append(allActive, activeUserOpLogs...)
+	allActive = append(allActive, activeDeployLogs...)
+	allActive = append(allActive, activeRevertLogs...)
 
 	txMetaByHash := make(map[string]map[string][]operationMeta)
 	blockTimestamps := make(map[uint64]int64)
-	if len(activeLogs) > 0 {
+	if len(allActive) > 0 {
 		if s.cfg.EnableTxEnrichment {
-			txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeLogs)
+			// Only UserOp logs need tx metadata enrichment (target / calldata).
+			// The other two event types don't use the per-op target lookup, so
+			// we narrow the tx-fetch set to the UserOp logs to avoid wasting RPC.
+			txMetaByHash, err = s.loadTransactionOperationMeta(ctx, activeUserOpLogs)
 			if err != nil {
 				return fmt.Errorf("load transaction metadata: %w", err)
 			}
 		}
 
-		blockTimestamps, err = s.loadBlockTimestamps(ctx, activeLogs)
+		// Block timestamps are needed for all three event types.
+		blockTimestamps, err = s.loadBlockTimestamps(ctx, allActive)
 		if err != nil {
 			return fmt.Errorf("load block timestamps: %w", err)
 		}
 	}
 
-	operations := make([]db.UserOperation, 0, len(activeLogs))
-	for i := range activeLogs {
-		log := activeLogs[i]
+	operations := make([]db.UserOperation, 0, len(activeUserOpLogs))
+	for i := range activeUserOpLogs {
+		log := activeUserOpLogs[i]
 
 		event, err := decodeUserOperationEventLog(log)
 		if err != nil {
 			return fmt.Errorf(
 				"decode user operation event tx %s block %s log_index %s: %w",
-				log.TransactionHash,
-				log.BlockNumber,
-				log.LogIndex,
-				err,
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
 			)
 		}
 
@@ -618,6 +645,97 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		})
 	}
 
+	deployments := make([]db.AccountDeployment, 0, len(activeDeployLogs))
+	for i := range activeDeployLogs {
+		log := activeDeployLogs[i]
+
+		event, err := decodeAccountDeployedLog(log)
+		if err != nil {
+			return fmt.Errorf(
+				"decode account deployed event tx %s block %s log_index %s: %w",
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
+			)
+		}
+
+		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
+		if !ok {
+			return fmt.Errorf("missing timestamp for block %d", event.BlockNumber)
+		}
+
+		blockNumberInt64, err := toInt64(event.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("convert block number %d: %w", event.BlockNumber, err)
+		}
+
+		deployments = append(deployments, db.AccountDeployment{
+			UserOpHash:     event.UserOpHash,
+			Sender:         event.Sender,
+			Factory:        event.Factory,
+			Paymaster:      event.Paymaster,
+			TxHash:         event.TxHash,
+			BlockNumber:    blockNumberInt64,
+			BlockTimestamp: blockTimestamp,
+			LogIndex:       event.LogIndex,
+		})
+	}
+
+	reverts := make([]db.UserOperationRevert, 0, len(activeRevertLogs))
+	for i := range activeRevertLogs {
+		log := activeRevertLogs[i]
+
+		event, err := decodeUserOperationRevertReasonLog(log)
+		if err != nil {
+			return fmt.Errorf(
+				"decode user operation revert reason event tx %s block %s log_index %s: %w",
+				log.TransactionHash, log.BlockNumber, log.LogIndex, err,
+			)
+		}
+
+		blockTimestamp, ok := blockTimestamps[event.BlockNumber]
+		if !ok {
+			return fmt.Errorf("missing timestamp for block %d", event.BlockNumber)
+		}
+
+		blockNumberInt64, err := toInt64(event.BlockNumber)
+		if err != nil {
+			return fmt.Errorf("convert block number %d: %w", event.BlockNumber, err)
+		}
+
+		reverts = append(reverts, db.UserOperationRevert{
+			UserOpHash:     event.UserOpHash,
+			Sender:         event.Sender,
+			Nonce:          event.Nonce,
+			RevertReason:   event.RevertReason,
+			TxHash:         event.TxHash,
+			BlockNumber:    blockNumberInt64,
+			BlockTimestamp: blockTimestamp,
+			LogIndex:       event.LogIndex,
+		})
+	}
+
+	// Enrichment pass: join deployments and reverts onto UserOperations by
+	// user_op_hash so the broadcast payload already carries the denormalized
+	// fields. Uses hex-encoded key to match map key semantics.
+	if len(operations) > 0 && (len(deployments) > 0 || len(reverts) > 0) {
+		deployedByHash := make(map[string]struct{}, len(deployments))
+		for i := range deployments {
+			deployedByHash[string(deployments[i].UserOpHash)] = struct{}{}
+		}
+		revertByHash := make(map[string][]byte, len(reverts))
+		for i := range reverts {
+			revertByHash[string(reverts[i].UserOpHash)] = reverts[i].RevertReason
+		}
+		for i := range operations {
+			key := string(operations[i].UserOpHash)
+			if _, ok := deployedByHash[key]; ok {
+				operations[i].AccountDeployed = true
+			}
+			if reason, ok := revertByHash[key]; ok {
+				operations[i].RevertReason = reason
+			}
+		}
+	}
+
 	if err := db.ReplaceEventsAndSetCursor(
 		ctx,
 		s.pool,
@@ -626,20 +744,19 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		toBlock,
 		toBlock,
 		operations,
-		nil, // deployments — populated in Task 3.1
-		nil, // reverts      — populated in Task 3.1
+		deployments,
+		reverts,
 	); err != nil {
 		return fmt.Errorf("persist range [%d,%d]: %w", fromBlock, toBlock, err)
 	}
 
 	slog.Info(
 		"indexed block range",
-		"from",
-		fromBlock,
-		"to",
-		toBlock,
-		"events",
-		len(operations),
+		"from", fromBlock,
+		"to", toBlock,
+		"user_ops", len(operations),
+		"deployments", len(deployments),
+		"reverts", len(reverts),
 	)
 
 	if len(operations) > 0 && s.OnOperationsIndexed != nil {
