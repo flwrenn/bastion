@@ -34,6 +34,8 @@ export interface UserOperation {
 	blockNumber: number;
 	blockTimestamp: number;
 	logIndex: number;
+	accountDeployed?: boolean;
+	revertReason?: string;
 }
 
 export type FeedStatus = 'disconnected' | 'connecting' | 'connected' | 'polling';
@@ -46,6 +48,7 @@ export interface IndexerStats {
 	sponsoredCount: number;
 	sponsoredRate: number;
 	uniqueSenders: number;
+	accountsDeployedCount: number;
 }
 
 /**
