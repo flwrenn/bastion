@@ -618,7 +618,7 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		})
 	}
 
-	if err := db.ReplaceOperationsAndSetCursor(
+	if err := db.ReplaceEventsAndSetCursor(
 		ctx,
 		s.pool,
 		s.cfg.StateKey,
@@ -626,6 +626,8 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 		toBlock,
 		toBlock,
 		operations,
+		nil, // deployments — populated in Task 3.1
+		nil, // reverts      — populated in Task 3.1
 	); err != nil {
 		return fmt.Errorf("persist range [%d,%d]: %w", fromBlock, toBlock, err)
 	}

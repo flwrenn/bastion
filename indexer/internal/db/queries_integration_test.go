@@ -102,7 +102,7 @@ func TestGetStatsIntegration(t *testing.T) {
 		testIntOp(senderB, paymaster1, false, 900001, 2),
 	}
 
-	err := ReplaceOperationsAndSetCursor(ctx, pool, "test_cursor", 900000, 900001, 900001, ops)
+	err := ReplaceEventsAndSetCursor(ctx, pool, "test_cursor", 900000, 900001, 900001, ops, nil, nil)
 	if err != nil {
 		t.Fatalf("insert test operations: %v", err)
 	}

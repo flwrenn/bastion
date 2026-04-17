@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-func TestReplaceOperationsAndSetCursorRejectsNilPool(t *testing.T) {
+func TestReplaceEventsAndSetCursorRejectsNilPool(t *testing.T) {
 	t.Parallel()
 
-	err := ReplaceOperationsAndSetCursor(
+	err := ReplaceEventsAndSetCursor(
 		context.Background(),
 		nil,
 		"user_operations.last_indexed_block",
 		0,
 		0,
 		0,
-		nil,
+		nil, nil, nil,
 	)
 	if err == nil {
 		t.Fatal("expected nil-pool error")
@@ -26,17 +26,17 @@ func TestReplaceOperationsAndSetCursorRejectsNilPool(t *testing.T) {
 	}
 }
 
-func TestReplaceOperationsAndSetCursorRejectsEmptyStateKey(t *testing.T) {
+func TestReplaceEventsAndSetCursorRejectsEmptyStateKey(t *testing.T) {
 	t.Parallel()
 
-	err := ReplaceOperationsAndSetCursor(
+	err := ReplaceEventsAndSetCursor(
 		context.Background(),
 		nil,
 		"",
 		0,
 		0,
 		0,
-		nil,
+		nil, nil, nil,
 	)
 	if err == nil {
 		t.Fatal("expected state key error")
