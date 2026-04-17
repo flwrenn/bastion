@@ -126,6 +126,87 @@ func TestGetStatsIntegration(t *testing.T) {
 	}
 }
 
+func TestListOperationsEnrichmentIntegration(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+
+	sender := make([]byte, 20)
+	sender[19] = 0x01
+	paymaster := make([]byte, 20)
+	factory := make([]byte, 20)
+	factory[19] = 0xFA
+
+	op := testIntOp(sender, paymaster, false, 900000, 0)
+	op.UserOpHash = bytes32("deadbeef")
+
+	dep := AccountDeployment{
+		UserOpHash:     op.UserOpHash,
+		Sender:         sender,
+		Factory:        factory,
+		Paymaster:      paymaster,
+		TxHash:         op.TxHash,
+		BlockNumber:    op.BlockNumber,
+		BlockTimestamp: op.BlockTimestamp,
+		LogIndex:       1, // different from UserOp's log_index
+	}
+	rev := UserOperationRevert{
+		UserOpHash:     op.UserOpHash,
+		Sender:         sender,
+		Nonce:          "0",
+		RevertReason:   []byte("boom"),
+		TxHash:         op.TxHash,
+		BlockNumber:    op.BlockNumber,
+		BlockTimestamp: op.BlockTimestamp,
+		LogIndex:       2,
+	}
+
+	if err := ReplaceEventsAndSetCursor(
+		ctx, pool, "test_cursor", 900000, 900000, 900000,
+		[]UserOperation{op},
+		[]AccountDeployment{dep},
+		[]UserOperationRevert{rev},
+	); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, total, err := ListOperations(ctx, pool, ListParams{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListOperations: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total = %d, want 1", total)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len = %d, want 1", len(got))
+	}
+	if !got[0].AccountDeployed {
+		t.Errorf("AccountDeployed = false, want true")
+	}
+	if string(got[0].RevertReason) != "boom" {
+		t.Errorf("RevertReason = %q, want %q", got[0].RevertReason, "boom")
+	}
+
+	byHash, err := GetOperationByHash(ctx, pool, op.UserOpHash)
+	if err != nil {
+		t.Fatalf("GetOperationByHash: %v", err)
+	}
+	if byHash == nil {
+		t.Fatal("GetOperationByHash returned nil")
+	}
+	if !byHash.AccountDeployed || string(byHash.RevertReason) != "boom" {
+		t.Errorf("GetOperationByHash enrichment missing: deployed=%v, reason=%q",
+			byHash.AccountDeployed, byHash.RevertReason)
+	}
+}
+
+// bytes32 returns a 32-byte slice with the given ASCII label in the leading
+// bytes and zero padding. Handy for distinguishing fixtures.
+func bytes32(label string) []byte {
+	out := make([]byte, 32)
+	copy(out, label)
+	return out
+}
+
 // testIntOp builds a minimal UserOperation for integration testing.
 func testIntOp(sender, paymaster []byte, success bool, block int64, logIdx int32) UserOperation {
 	hash := make([]byte, 32)
