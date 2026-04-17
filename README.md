@@ -232,3 +232,10 @@ One bullet per decision, in the order an evaluator is likely to ask about them.
 - **Polling + WebSocket hybrid for event ingestion.** `eth_getLogs` polling is the authoritative range scanner and the only path that handles reorgs. `eth_subscribe` over `WS_RPC_URL` is a *trigger* — a `newHeads` event causes the loop to wake immediately instead of sleeping for `INDEXER_POLL_INTERVAL`. If the WS drops, polling continues unchanged. WS is optimization, not a dependency.
 - **REST for history, WebSocket for live.** REST is cacheable, paginated, and easy to test; the frontend hydrates with REST then overlays the WS stream for deltas. Falls back to REST polling if WS is unavailable.
 - **Reorg strategy: confirmation lag + rewind window.** Only index blocks at `safeHead = latest − INDEXER_CONFIRMATIONS`. Each loop rewinds `INDEXER_REORG_WINDOW` blocks from the cursor before the next `getLogs` call, so any range that reorged within the window is re-indexed. Replacement is atomic (delete-above + insert + cursor update in one transaction), so readers never observe a partial state.
+
+## Limitations & Trade-offs
+
+- **Session keys are single-call only.** The account validates that the outer call is `execute`, not `executeBatch`. Lifting this would require scoping every inner call individually during `validateUserOp`.
+- **Session-key list is not enumerable on-chain.** Registered keys are stored in a non-iterable mapping; the UI tracks the set in memory and relies on `SessionKeyAdded` / `SessionKeyRevoked` events as the source of truth. A production UI would index these.
+- **Single EntryPoint on a single chain.** The indexer is configured for one `ENTRYPOINT` on one `RPC_URL`. Scaling to multiple contracts or chains would need a worker-per-chain model sharing the Postgres instance — orthogonal to the rest of the design, but not implemented.
+- **No frontend test suite.** Deliberate scope choice — frontend behavior is covered by the manual [Demo Walkthrough](#demo-walkthrough). Contracts have Foundry tests, indexer has Go tests (`make test`).
