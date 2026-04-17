@@ -715,7 +715,9 @@ func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlo
 
 	// Enrichment pass: join deployments and reverts onto UserOperations by
 	// user_op_hash so the broadcast payload already carries the denormalized
-	// fields. Uses hex-encoded key to match map key semantics.
+	// fields. Map keys are the raw 32-byte hash stringified (string([]byte) —
+	// the canonical Go pattern for byte-slice keys), giving byte-equality
+	// lookup without the cost of hex encoding.
 	if len(operations) > 0 && (len(deployments) > 0 || len(reverts) > 0) {
 		deployedByHash := make(map[string]struct{}, len(deployments))
 		for i := range deployments {
