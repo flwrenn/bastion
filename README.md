@@ -98,6 +98,8 @@ bastion/
 
 ## Setup
 
+Per-component details. See [Quick Start](#quick-start) for the condensed zero-to-running flow.
+
 ### Contracts
 
 ```sh
@@ -162,11 +164,3 @@ make test     # Run all test suites
 | `FaucetToken` | ERC-20 with `claim()` faucet | Not started |
 
 **EntryPoint v0.7:** `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
-
-<!-- ## Contract Addresses (Sepolia)
-
-Deployed addresses will be added after Issue #7. -->
-
-<!-- ## Demo Walkthrough
-
-Step-by-step demo guide will be added once the frontend is functional. -->
