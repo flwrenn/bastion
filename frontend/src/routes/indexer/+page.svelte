@@ -39,6 +39,43 @@
 		return !!paymaster && paymaster !== '0x' && paymaster !== '0x' + '0'.repeat(40);
 	}
 
+	/**
+	 * Best-effort decode of revert reason bytes into a human-readable string.
+	 * Handles the standard Solidity Error(string) selector (0x08c379a0) plus
+	 * plain UTF-8 bytes. Falls back to raw hex when the decoded string would
+	 * contain control characters.
+	 */
+	function formatRevertReason(hex: string | undefined): string {
+		if (!hex || hex === '0x') return '';
+		const raw = hex.startsWith('0x') ? hex.slice(2) : hex;
+
+		// Solidity Error(string): 0x08c379a0 + abi.encode(string)
+		if (raw.startsWith('08c379a0') && raw.length >= 8 + 128) {
+			try {
+				// Skip selector (4 bytes) + offset word (32 bytes); next word = length
+				const lenHex = raw.slice(8 + 64, 8 + 128);
+				const strLen = parseInt(lenHex, 16);
+				const dataHex = raw.slice(8 + 128, 8 + 128 + strLen * 2);
+				const bytes = new Uint8Array(dataHex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
+				const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+				if (!/[\x00-\x08\x0e-\x1f]/.test(text)) return text;
+			} catch {
+				// fall through to raw hex
+			}
+		}
+
+		// Plain UTF-8 sniff
+		try {
+			const bytes = new Uint8Array(raw.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
+			const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+			if (text.length > 0 && !/[\x00-\x08\x0e-\x1f]/.test(text)) return text;
+		} catch {
+			// fall through
+		}
+
+		return hex;
+	}
+
 	/** Auto-scroll: keep the page scrolled to top when new ops arrive (if user is near top). */
 	let prevCount = 0;
 
@@ -139,21 +176,32 @@
 								{/if}
 							</td>
 
-							<!-- Success -->
+							<!-- Status -->
 							<td class="px-4 py-3">
-								{#if op.success}
-									<span
-										class="inline-block rounded bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300"
-									>
-										Success
-									</span>
-								{:else}
-									<span
-										class="inline-block rounded bg-red-900/60 px-2 py-0.5 text-xs font-medium text-red-300"
-									>
-										Reverted
-									</span>
-								{/if}
+								<div class="flex items-center gap-1.5">
+									{#if op.success}
+										<span
+											class="inline-block rounded bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300"
+										>
+											Success
+										</span>
+									{:else}
+										<span
+											class="inline-block rounded bg-red-900/60 px-2 py-0.5 text-xs font-medium text-red-300"
+											title={op.revertReason ? formatRevertReason(op.revertReason) : undefined}
+										>
+											Reverted
+										</span>
+									{/if}
+									{#if op.accountDeployed}
+										<span
+											class="inline-block rounded bg-blue-900/60 px-2 py-0.5 text-xs font-medium text-blue-300"
+											title="Account deployed in this UserOp"
+										>
+											Deployed
+										</span>
+									{/if}
+								</div>
 							</td>
 
 							<!-- Gas Cost -->
