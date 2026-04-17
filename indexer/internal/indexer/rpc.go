@@ -334,12 +334,20 @@ func (c *rpcClient) latestBlockNumber(ctx context.Context) (uint64, error) {
 	return value, nil
 }
 
-func (c *rpcClient) getLogs(ctx context.Context, address string, topic0 string, fromBlock uint64, toBlock uint64) ([]rpcLog, error) {
+// getLogs fetches event logs for the given address across the block range.
+// topic0s is an OR-filter: a log is returned if its Topics[0] matches any of
+// the supplied values. Passing an empty slice means no topic filter, which is
+// usually not what you want — pass the exact topic0 hashes you care about.
+func (c *rpcClient) getLogs(ctx context.Context, address string, topic0s []string, fromBlock uint64, toBlock uint64) ([]rpcLog, error) {
 	filter := map[string]any{
 		"address":   address,
 		"fromBlock": fmt.Sprintf("0x%x", fromBlock),
 		"toBlock":   fmt.Sprintf("0x%x", toBlock),
-		"topics":    []any{topic0},
+	}
+	if len(topic0s) > 0 {
+		// JSON-RPC spec: topics is an array-of-arrays. Nested array at position 0
+		// is an OR filter across topic0.
+		filter["topics"] = []any{topic0s}
 	}
 
 	var logs []rpcLog

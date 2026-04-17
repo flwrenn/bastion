@@ -535,7 +535,17 @@ func (s *Service) indexRange(ctx context.Context, fromBlock uint64, toBlock uint
 }
 
 func (s *Service) indexRangeAttempt(ctx context.Context, fromBlock uint64, toBlock uint64) error {
-	logs, err := s.rpc.getLogs(ctx, s.entryPoint, userOperationEventTopic, fromBlock, toBlock)
+	logs, err := s.rpc.getLogs(
+		ctx,
+		s.entryPoint,
+		[]string{
+			userOperationEventTopic,
+			accountDeployedTopic,
+			userOperationRevertReasonTopic,
+		},
+		fromBlock,
+		toBlock,
+	)
 	if err != nil {
 		return fmt.Errorf("fetch logs [%d,%d]: %w", fromBlock, toBlock, err)
 	}
