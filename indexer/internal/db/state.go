@@ -62,7 +62,12 @@ func setStateTx(ctx context.Context, tx pgx.Tx, key, value string) error {
 	return nil
 }
 
-func TrimOperationsAboveBlockAndSetCursor(
+// TrimEventsAboveBlockAndSetCursor deletes rows above the safe head across
+// all three event tables (user_operations, account_deployments,
+// user_operation_reverts) and resets the cursor to the safe head. Used when
+// the indexer detects its cursor has advanced past the safe head (rare,
+// happens after local RPC provider switches / state rewinds).
+func TrimEventsAboveBlockAndSetCursor(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	stateKey string,
@@ -85,11 +90,13 @@ func TrimOperationsAboveBlockAndSetCursor(
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx,
-		"DELETE FROM user_operations WHERE block_number > $1",
-		int64(safeHead),
-	); err != nil {
-		return fmt.Errorf("delete operations above safe head %d: %w", safeHead, err)
+	for _, table := range []string{"user_operations", "account_deployments", "user_operation_reverts"} {
+		if _, err := tx.Exec(ctx,
+			fmt.Sprintf("DELETE FROM %s WHERE block_number > $1", table),
+			int64(safeHead),
+		); err != nil {
+			return fmt.Errorf("delete %s above safe head %d: %w", table, safeHead, err)
+		}
 	}
 
 	if err := setStateTx(ctx, tx, stateKey, strconv.FormatUint(safeHead, 10)); err != nil {

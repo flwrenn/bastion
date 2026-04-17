@@ -20,10 +20,10 @@ func TestGetStateRejectsNilPool(t *testing.T) {
 	}
 }
 
-func TestTrimOperationsAboveBlockAndSetCursorRejectsNilPool(t *testing.T) {
+func TestTrimEventsAboveBlockAndSetCursorRejectsNilPool(t *testing.T) {
 	t.Parallel()
 
-	err := TrimOperationsAboveBlockAndSetCursor(context.Background(), nil, "cursor", 1)
+	err := TrimEventsAboveBlockAndSetCursor(context.Background(), nil, "cursor", 1)
 	if err == nil {
 		t.Fatal("expected nil-pool error")
 	}
@@ -32,10 +32,10 @@ func TestTrimOperationsAboveBlockAndSetCursorRejectsNilPool(t *testing.T) {
 	}
 }
 
-func TestTrimOperationsAboveBlockAndSetCursorRejectsEmptyStateKey(t *testing.T) {
+func TestTrimEventsAboveBlockAndSetCursorRejectsEmptyStateKey(t *testing.T) {
 	t.Parallel()
 
-	err := TrimOperationsAboveBlockAndSetCursor(context.Background(), nil, "", 1)
+	err := TrimEventsAboveBlockAndSetCursor(context.Background(), nil, "", 1)
 	if err == nil {
 		t.Fatal("expected state key error")
 	}
@@ -44,10 +44,10 @@ func TestTrimOperationsAboveBlockAndSetCursorRejectsEmptyStateKey(t *testing.T) 
 	}
 }
 
-func TestTrimOperationsAboveBlockAndSetCursorRejectsOverflow(t *testing.T) {
+func TestTrimEventsAboveBlockAndSetCursorRejectsOverflow(t *testing.T) {
 	t.Parallel()
 
-	err := TrimOperationsAboveBlockAndSetCursor(
+	err := TrimEventsAboveBlockAndSetCursor(
 		context.Background(),
 		&pgxpool.Pool{},
 		"cursor",

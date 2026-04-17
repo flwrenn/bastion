@@ -371,7 +371,7 @@ func (s *Service) indexOnce(ctx context.Context) error {
 			"delta",
 			delta,
 		)
-		if err := db.TrimOperationsAboveBlockAndSetCursor(ctx, s.pool, s.cfg.StateKey, safeHead); err != nil {
+		if err := db.TrimEventsAboveBlockAndSetCursor(ctx, s.pool, s.cfg.StateKey, safeHead); err != nil {
 			return fmt.Errorf("reconcile cursor to safe head: %w", err)
 		}
 		cursor = safeHead
