@@ -239,3 +239,13 @@ One bullet per decision, in the order an evaluator is likely to ask about them.
 - **Session-key list is not enumerable on-chain.** Registered keys are stored in a non-iterable mapping; the UI tracks the set in memory and relies on `SessionKeyAdded` / `SessionKeyRevoked` events as the source of truth. A production UI would index these.
 - **Single EntryPoint on a single chain.** The indexer is configured for one `ENTRYPOINT` on one `RPC_URL`. Scaling to multiple contracts or chains would need a worker-per-chain model sharing the Postgres instance — orthogonal to the rest of the design, but not implemented.
 - **No frontend test suite.** Deliberate scope choice — frontend behavior is covered by the manual [Demo Walkthrough](#demo-walkthrough). Contracts have Foundry tests, indexer has Go tests (`make test`).
+
+## Running Tests
+
+```sh
+make test          # forge test -vvv  +  go test ./...
+make forge-test    # contracts only
+make indexer-test  # indexer only
+```
+
+The frontend has no automated test suite — see [Limitations & Trade-offs](#limitations--trade-offs). Verification there is manual via the [Demo Walkthrough](#demo-walkthrough).
