@@ -9,9 +9,11 @@ import (
 )
 
 var (
-	userOperationEventTopic = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
-	handleOpsSelector       = []byte{0x76, 0x5e, 0x82, 0x7f}
-	executeSelector         = []byte{0xb6, 0x1d, 0x27, 0xf6}
+	userOperationEventTopic        = "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
+	accountDeployedTopic           = "0xd51a9c61267aa6196961883ecf5ff2da6619c37dac0fa92122513fb32c032d2d"
+	userOperationRevertReasonTopic = "0x1c4fada7374c0a9ee8841fc38afe82932dc0f8e69012e927f061a8bae611a201"
+	handleOpsSelector              = []byte{0x76, 0x5e, 0x82, 0x7f}
+	executeSelector                = []byte{0xb6, 0x1d, 0x27, 0xf6}
 )
 
 type decodedEvent struct {
@@ -26,6 +28,26 @@ type decodedEvent struct {
 	TxHashHex     string
 	BlockNumber   uint64
 	LogIndex      int32
+}
+
+type decodedAccountDeployedEvent struct {
+	UserOpHash  []byte
+	Sender      []byte
+	Factory     []byte
+	Paymaster   []byte
+	TxHash      []byte
+	BlockNumber uint64
+	LogIndex    int32
+}
+
+type decodedUserOperationRevertReasonEvent struct {
+	UserOpHash   []byte
+	Sender       []byte
+	Nonce        string
+	RevertReason []byte
+	TxHash       []byte
+	BlockNumber  uint64
+	LogIndex     int32
 }
 
 type operationCall struct {
@@ -369,4 +391,172 @@ func bytesEqual(a []byte, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// decodeAccountDeployedLog parses an EntryPoint v0.7 AccountDeployed log.
+//
+// Event signature:
+//
+//	AccountDeployed(bytes32 indexed userOpHash, address indexed sender,
+//	                address factory, address paymaster)
+//
+// Topics[0] is the event signature hash; topics[1] is userOpHash;
+// topics[2] is the indexed sender (right-aligned in a 32-byte word).
+// data is exactly 64 bytes: factory (right-aligned) + paymaster (right-aligned).
+func decodeAccountDeployedLog(log rpcLog) (decodedAccountDeployedEvent, error) {
+	if len(log.Topics) != 3 {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("expected 3 topics, got %d", len(log.Topics))
+	}
+
+	if !strings.EqualFold(log.Topics[0], accountDeployedTopic) {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("unexpected topic0 %q", log.Topics[0])
+	}
+
+	userOpHash, err := decodeHexFixed(log.Topics[1], 32)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("decode userOpHash topic: %w", err)
+	}
+
+	sender, err := decodeIndexedAddress(log.Topics[2])
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("decode sender topic: %w", err)
+	}
+
+	data, err := decodeHex(log.Data)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("decode log data: %w", err)
+	}
+	if len(data) != 32*2 {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("expected 64 bytes of log data, got %d", len(data))
+	}
+
+	factoryWord, err := wordAt(data, 0)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("read factory word: %w", err)
+	}
+	paymasterWord, err := wordAt(data, 32)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("read paymaster word: %w", err)
+	}
+
+	factory := append([]byte(nil), factoryWord[12:32]...)
+	paymaster := append([]byte(nil), paymasterWord[12:32]...)
+
+	txHash, err := decodeHexFixed(log.TransactionHash, 32)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("decode transaction hash: %w", err)
+	}
+
+	blockNumber, err := parseHexUint64(log.BlockNumber)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("parse block number: %w", err)
+	}
+
+	logIndexValue, err := parseHexUint64(log.LogIndex)
+	if err != nil {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("parse log index: %w", err)
+	}
+	if logIndexValue > math.MaxInt32 {
+		return decodedAccountDeployedEvent{}, fmt.Errorf("log index %d overflows int32", logIndexValue)
+	}
+
+	return decodedAccountDeployedEvent{
+		UserOpHash:  userOpHash,
+		Sender:      sender,
+		Factory:     factory,
+		Paymaster:   paymaster,
+		TxHash:      txHash,
+		BlockNumber: blockNumber,
+		LogIndex:    int32(logIndexValue),
+	}, nil
+}
+
+// decodeUserOperationRevertReasonLog parses an EntryPoint v0.7
+// UserOperationRevertReason log.
+//
+// Event signature:
+//
+//	UserOperationRevertReason(bytes32 indexed userOpHash, address indexed sender,
+//	                          uint256 nonce, bytes revertReason)
+//
+// Topics[0] is the event signature hash; topics[1] is userOpHash;
+// topics[2] is the indexed sender. Data layout:
+//
+//	word 0  — nonce (uint256)
+//	word 1  — offset to revertReason dynamic bytes (relative to start of data)
+//	word 2+ — revertReason length word followed by padded bytes
+func decodeUserOperationRevertReasonLog(log rpcLog) (decodedUserOperationRevertReasonEvent, error) {
+	if len(log.Topics) != 3 {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("expected 3 topics, got %d", len(log.Topics))
+	}
+
+	if !strings.EqualFold(log.Topics[0], userOperationRevertReasonTopic) {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("unexpected topic0 %q", log.Topics[0])
+	}
+
+	userOpHash, err := decodeHexFixed(log.Topics[1], 32)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("decode userOpHash topic: %w", err)
+	}
+
+	sender, err := decodeIndexedAddress(log.Topics[2])
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("decode sender topic: %w", err)
+	}
+
+	data, err := decodeHex(log.Data)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("decode log data: %w", err)
+	}
+	if len(data) < 32*2 {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("data too short for revert reason: %d bytes", len(data))
+	}
+
+	nonceWord, err := wordAt(data, 0)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("read nonce: %w", err)
+	}
+	nonce := uint256ToDecimal(nonceWord)
+
+	offsetWord, err := wordAt(data, 32)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("read bytes offset: %w", err)
+	}
+	offset, err := wordToOffset(offsetWord)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("parse bytes offset: %w", err)
+	}
+
+	revertReason, err := readDynamicBytes(data, 0, offset)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("read revertReason bytes: %w", err)
+	}
+
+	txHash, err := decodeHexFixed(log.TransactionHash, 32)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("decode transaction hash: %w", err)
+	}
+
+	blockNumber, err := parseHexUint64(log.BlockNumber)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("parse block number: %w", err)
+	}
+
+	logIndexValue, err := parseHexUint64(log.LogIndex)
+	if err != nil {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("parse log index: %w", err)
+	}
+	if logIndexValue > math.MaxInt32 {
+		return decodedUserOperationRevertReasonEvent{}, fmt.Errorf("log index %d overflows int32", logIndexValue)
+	}
+
+	return decodedUserOperationRevertReasonEvent{
+		UserOpHash:   userOpHash,
+		Sender:       sender,
+		Nonce:        nonce,
+		RevertReason: revertReason,
+		TxHash:       txHash,
+		BlockNumber:  blockNumber,
+		LogIndex:     int32(logIndexValue),
+	}, nil
 }
