@@ -167,10 +167,11 @@ func GetOperationByHash(ctx context.Context, pool *pgxpool.Pool, hash []byte) (*
 
 // Stats holds aggregate statistics for indexed user operations.
 type Stats struct {
-	TotalOps       int64
-	SuccessCount   int64
-	SponsoredCount int64
-	UniqueSenders  int64
+	TotalOps              int64
+	SuccessCount          int64
+	SponsoredCount        int64
+	UniqueSenders         int64
+	AccountsDeployedCount int64
 }
 
 // zeroPaymaster is the 20-byte zero address used to identify self-funded
@@ -180,6 +181,8 @@ type Stats struct {
 var zeroPaymaster = [20]byte{}
 
 // GetStats returns aggregate statistics across all indexed operations.
+// AccountsDeployedCount counts user_operations rows that have a matching
+// account_deployments row, joined on user_op_hash.
 func GetStats(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 	if pool == nil {
 		return Stats{}, errors.New("pool is required")
@@ -187,12 +190,14 @@ func GetStats(ctx context.Context, pool *pgxpool.Pool) (Stats, error) {
 	var s Stats
 	err := pool.QueryRow(ctx, `
 		SELECT count(*),
-		       count(*) FILTER (WHERE success),
-		       count(*) FILTER (WHERE paymaster != $1),
-		       count(DISTINCT sender)
-		FROM user_operations`,
+		       count(*) FILTER (WHERE uo.success),
+		       count(*) FILTER (WHERE uo.paymaster != $1),
+		       count(DISTINCT uo.sender),
+		       count(*) FILTER (WHERE ad.user_op_hash IS NOT NULL)
+		FROM user_operations uo
+		LEFT JOIN account_deployments ad ON ad.user_op_hash = uo.user_op_hash`,
 		zeroPaymaster[:],
-	).Scan(&s.TotalOps, &s.SuccessCount, &s.SponsoredCount, &s.UniqueSenders)
+	).Scan(&s.TotalOps, &s.SuccessCount, &s.SponsoredCount, &s.UniqueSenders, &s.AccountsDeployedCount)
 	if err != nil {
 		return Stats{}, fmt.Errorf("query stats: %w", err)
 	}

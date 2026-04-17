@@ -102,7 +102,32 @@ func TestGetStatsIntegration(t *testing.T) {
 		testIntOp(senderB, paymaster1, false, 900001, 2),
 	}
 
-	err := ReplaceEventsAndSetCursor(ctx, pool, "test_cursor", 900000, 900001, 900001, ops, nil, nil)
+	// After the existing five-op setup, also insert two deployments keyed to
+	// ops #1 and #3 (senderA's first op and senderB's first op).
+	deployments := []AccountDeployment{
+		{
+			UserOpHash:     ops[0].UserOpHash,
+			Sender:         senderA,
+			Factory:        make([]byte, 20),
+			Paymaster:      make([]byte, 20),
+			TxHash:         ops[0].TxHash,
+			BlockNumber:    ops[0].BlockNumber,
+			BlockTimestamp: ops[0].BlockTimestamp,
+			LogIndex:       99, // deploy log before userOp log in the same tx
+		},
+		{
+			UserOpHash:     ops[2].UserOpHash,
+			Sender:         senderB,
+			Factory:        make([]byte, 20),
+			Paymaster:      make([]byte, 20),
+			TxHash:         ops[2].TxHash,
+			BlockNumber:    ops[2].BlockNumber,
+			BlockTimestamp: ops[2].BlockTimestamp,
+			LogIndex:       98,
+		},
+	}
+
+	err := ReplaceEventsAndSetCursor(ctx, pool, "test_cursor", 900000, 900001, 900001, ops, deployments, nil)
 	if err != nil {
 		t.Fatalf("insert test operations: %v", err)
 	}
@@ -123,6 +148,9 @@ func TestGetStatsIntegration(t *testing.T) {
 	}
 	if got.UniqueSenders != 3 {
 		t.Errorf("UniqueSenders = %d, want 3", got.UniqueSenders)
+	}
+	if got.AccountsDeployedCount != 2 {
+		t.Errorf("AccountsDeployedCount = %d, want 2", got.AccountsDeployedCount)
 	}
 }
 
