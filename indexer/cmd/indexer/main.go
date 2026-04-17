@@ -13,6 +13,7 @@ import (
 	"github.com/flwrenn/bastion/indexer/internal/api"
 	"github.com/flwrenn/bastion/indexer/internal/db"
 	"github.com/flwrenn/bastion/indexer/internal/indexer"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -23,6 +24,17 @@ func main() {
 }
 
 func run() error {
+	// Load .env from the current or parent directory, if present. Missing file
+	// is not fatal — production and CI supply env vars through other means.
+	// When running via `make dev` the working directory is indexer/, so we
+	// also try the repo root to pick up the shared .env there.
+	for _, path := range []string{".env", "../.env"} {
+		if err := godotenv.Load(path); err == nil {
+			slog.Info("loaded env file", "path", path)
+			break
+		}
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
