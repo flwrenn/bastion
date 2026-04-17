@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/flwrenn/bastion/indexer/internal/db"
@@ -654,5 +655,55 @@ func TestGetStatsStoreError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestToResponseIncludesEnrichmentFields(t *testing.T) {
+	t.Parallel()
+
+	op := db.UserOperation{
+		UserOpHash:      make([]byte, 32),
+		Sender:          make([]byte, 20),
+		Paymaster:       make([]byte, 20),
+		TxHash:          make([]byte, 32),
+		Nonce:           "0",
+		ActualGasCost:   "0",
+		ActualGasUsed:   "0",
+		AccountDeployed: true,
+		RevertReason:    []byte("boom"),
+	}
+
+	got := toResponse(op)
+	if !got.AccountDeployed {
+		t.Fatal("AccountDeployed not propagated")
+	}
+	if got.RevertReason != "0x626f6f6d" {
+		t.Fatalf("RevertReason = %q, want 0x626f6f6d", got.RevertReason)
+	}
+}
+
+func TestToResponseOmitsEmptyEnrichmentFields(t *testing.T) {
+	t.Parallel()
+
+	op := db.UserOperation{
+		UserOpHash:    make([]byte, 32),
+		Sender:        make([]byte, 20),
+		Paymaster:     make([]byte, 20),
+		TxHash:        make([]byte, 32),
+		Nonce:         "0",
+		ActualGasCost: "0",
+		ActualGasUsed: "0",
+	}
+
+	got := toResponse(op)
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(payload), "accountDeployed") {
+		t.Errorf("accountDeployed should be omitted when false; got %s", payload)
+	}
+	if strings.Contains(string(payload), "revertReason") {
+		t.Errorf("revertReason should be omitted when empty; got %s", payload)
 	}
 }
