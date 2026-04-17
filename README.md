@@ -26,6 +26,51 @@ Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2 (Svelte 5, viem,
 
 **Shared Frontend:** SvelteKit app for wallet connection, smart account deployment, owner and session key interactions, and indexer dashboard.
 
+## Quick Start
+
+Get from clone to all services running against Sepolia in under 10 minutes.
+
+### 1. Root env
+
+```sh
+cp .env.example .env
+```
+
+Fill in:
+
+- `SEPOLIA_RPC_URL` — Alchemy/Infura/QuickNode Sepolia HTTPS endpoint
+- `ETHERSCAN_API_KEY` — only required if you plan to redeploy with `make forge-deploy`
+- `DEPLOYER_PRIVATE_KEY` — only required if you plan to redeploy
+- `DATABASE_URL` — leave as-is if using the bundled `make db-up`
+- `RPC_URL` — same Sepolia endpoint as `SEPOLIA_RPC_URL`
+- `INDEXER_START_BLOCK` — any recent Sepolia block before the first deployed `UserOperationEvent` you want indexed
+
+### 2. Frontend env
+
+```sh
+cp frontend/.env.example frontend/.env
+```
+
+Fill in:
+
+- `PUBLIC_FACTORY_ADDRESS`, `PUBLIC_COUNTER_ADDRESS`, `PUBLIC_FAUCET_TOKEN_ADDRESS` — use the addresses from the [Deployed on Sepolia](#deployed-on-sepolia) table, or run `make export-addresses` after a redeploy to regenerate them automatically
+- `PUBLIC_PIMLICO_API_KEY` — create one at [pimlico.io](https://pimlico.io); the free tier covers the demo
+- `PUBLIC_INDEXER_URL` — leave as `http://localhost:3001`
+
+### 3. Build, then run
+
+```sh
+make db-up          # Postgres via docker compose
+make forge-build    # Compile contracts
+make export-abis    # Bridge ABIs into frontend/src/lib/contracts/
+make dev            # Starts indexer + frontend (contracts already compiled)
+```
+
+- Frontend: http://localhost:5173
+- Indexer API: http://localhost:3001
+
+Running a fresh deployment is **not** required — the Sepolia addresses in the status table below are live and verified. If you do want to redeploy, `make forge-deploy` handles build, broadcast, and Etherscan verification in one step (requires `ETHERSCAN_API_KEY` and `DEPLOYER_PRIVATE_KEY`).
+
 ## Directory Structure
 
 ```
