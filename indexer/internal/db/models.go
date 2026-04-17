@@ -4,6 +4,12 @@ package db
 // Fields map to the EntryPoint v0.7 UserOperationEvent plus
 // decoded inner-call fields (target, calldata) and transaction-
 // level context (tx hash, block, timestamp, log index).
+//
+// AccountDeployed and RevertReason are NOT persisted in the user_operations
+// table. They are denormalized fields populated either by an in-memory
+// enrichment pass (indexer broadcast path) or by a LEFT JOIN from the
+// read path (REST/WS list+get). Any `omitempty` JSON serialization must
+// live at the API layer, not here.
 type UserOperation struct {
 	ID             int64
 	UserOpHash     []byte
@@ -19,6 +25,10 @@ type UserOperation struct {
 	BlockNumber    int64
 	BlockTimestamp int64
 	LogIndex       int32
+
+	// Denormalized read-path fields — not in user_operations table.
+	AccountDeployed bool
+	RevertReason    []byte
 }
 
 // AccountDeployment represents a row in the account_deployments table.
