@@ -18,6 +18,18 @@ const jsonRPCVersion = "2.0"
 
 var errRPCResponseTooLarge = errors.New("rpc response exceeds size limit")
 
+// httpStatusErrorBodyLimit caps how much of a non-2xx response body is retained
+// in a httpStatusError. The full body can be up to maxResponseBytes (8 MiB by
+// default), which would bloat logs and heap if the error is propagated.
+const httpStatusErrorBodyLimit = 512
+
+// maxBackoffShift caps the attempt exponent used in backoffDelay to prevent
+// int64 overflow when computing BaseDelay * (1 << attempt). With BaseDelay of
+// a few hundred milliseconds, shift values beyond ~40 already exceed any
+// realistic MaxDelay, so clamping here is safe and stabilizes behavior if the
+// attempt count is ever misconfigured.
+const maxBackoffShift = 30
+
 // retryConfig controls exponential backoff for RPC calls.
 type retryConfig struct {
 	MaxAttempts    int
@@ -84,11 +96,7 @@ type httpStatusError struct {
 }
 
 func (e *httpStatusError) Error() string {
-	body := e.body
-	if len(body) > 256 {
-		body = body[:256] + "…(truncated)"
-	}
-	return fmt.Sprintf("rpc %s: HTTP %d: %s", e.method, e.statusCode, body)
+	return fmt.Sprintf("rpc %s: HTTP %d: %s", e.method, e.statusCode, e.body)
 }
 
 // jsonRPCCallError wraps a JSON-RPC level error (error field in response).
@@ -152,7 +160,7 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 			method:     method,
 			statusCode: httpResp.StatusCode,
 			retryAfter: parseRetryAfter(httpResp.Header.Get("Retry-After")),
-			body:       string(body),
+			body:       truncateErrorBody(body),
 		}
 	}
 
@@ -260,11 +268,32 @@ func (c *rpcClient) backoffDelay(attempt int, err error) time.Duration {
 		return httpErr.retryAfter
 	}
 
-	delay := c.retry.BaseDelay * time.Duration(1<<attempt)
-	if delay > c.retry.MaxDelay {
+	// Clamp the shift so BaseDelay * (1<<attempt) cannot overflow int64 and
+	// produce a negative delay. With any realistic BaseDelay, shifts beyond
+	// maxBackoffShift already exceed MaxDelay, so clamping is safe.
+	shift := attempt
+	if shift < 0 {
+		shift = 0
+	}
+	if shift > maxBackoffShift {
+		shift = maxBackoffShift
+	}
+	delay := c.retry.BaseDelay * time.Duration(1<<shift)
+	if delay <= 0 || delay > c.retry.MaxDelay {
 		delay = c.retry.MaxDelay
 	}
 	return delay
+}
+
+// truncateErrorBody returns a short excerpt of an HTTP response body suitable
+// for embedding in an error. Full bodies can be up to maxResponseBytes
+// (8 MiB by default), which would bloat logs and heap if the error is
+// propagated through multiple wraps.
+func truncateErrorBody(body []byte) string {
+	if len(body) <= httpStatusErrorBodyLimit {
+		return string(body)
+	}
+	return fmt.Sprintf("%s…(truncated, %d bytes total)", body[:httpStatusErrorBodyLimit], len(body))
 }
 
 // parseRetryAfter extracts a duration from the Retry-After HTTP header.
