@@ -129,31 +129,34 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, statsResponse{
-		TotalOps:       s.TotalOps,
-		SuccessCount:   s.SuccessCount,
-		SuccessRate:    successRate,
-		SponsoredCount: s.SponsoredCount,
-		SponsoredRate:  sponsoredRate,
-		UniqueSenders:  s.UniqueSenders,
+		TotalOps:              s.TotalOps,
+		SuccessCount:          s.SuccessCount,
+		SuccessRate:           successRate,
+		SponsoredCount:        s.SponsoredCount,
+		SponsoredRate:         sponsoredRate,
+		UniqueSenders:         s.UniqueSenders,
+		AccountsDeployedCount: s.AccountsDeployedCount,
 	})
 }
 
 // --- response types ---
 
 type operationResponse struct {
-	UserOpHash     string `json:"userOpHash"`
-	Sender         string `json:"sender"`
-	Paymaster      string `json:"paymaster"`
-	Target         string `json:"target,omitempty"`
-	Calldata       string `json:"calldata,omitempty"`
-	Nonce          string `json:"nonce"`
-	Success        bool   `json:"success"`
-	ActualGasCost  string `json:"actualGasCost"`
-	ActualGasUsed  string `json:"actualGasUsed"`
-	TxHash         string `json:"txHash"`
-	BlockNumber    int64  `json:"blockNumber"`
-	BlockTimestamp int64  `json:"blockTimestamp"`
-	LogIndex       int32  `json:"logIndex"`
+	UserOpHash      string `json:"userOpHash"`
+	Sender          string `json:"sender"`
+	Paymaster       string `json:"paymaster"`
+	Target          string `json:"target,omitempty"`
+	Calldata        string `json:"calldata,omitempty"`
+	Nonce           string `json:"nonce"`
+	Success         bool   `json:"success"`
+	ActualGasCost   string `json:"actualGasCost"`
+	ActualGasUsed   string `json:"actualGasUsed"`
+	TxHash          string `json:"txHash"`
+	BlockNumber     int64  `json:"blockNumber"`
+	BlockTimestamp  int64  `json:"blockTimestamp"`
+	LogIndex        int32  `json:"logIndex"`
+	AccountDeployed bool   `json:"accountDeployed,omitempty"`
+	RevertReason    string `json:"revertReason,omitempty"`
 }
 
 type listResponse struct {
@@ -164,30 +167,39 @@ type listResponse struct {
 }
 
 type statsResponse struct {
-	TotalOps       int64   `json:"totalOps"`
-	SuccessCount   int64   `json:"successCount"`
-	SuccessRate    float64 `json:"successRate"`
-	SponsoredCount int64   `json:"sponsoredCount"`
-	SponsoredRate  float64 `json:"sponsoredRate"`
-	UniqueSenders  int64   `json:"uniqueSenders"`
+	TotalOps              int64   `json:"totalOps"`
+	SuccessCount          int64   `json:"successCount"`
+	SuccessRate           float64 `json:"successRate"`
+	SponsoredCount        int64   `json:"sponsoredCount"`
+	SponsoredRate         float64 `json:"sponsoredRate"`
+	UniqueSenders         int64   `json:"uniqueSenders"`
+	AccountsDeployedCount int64   `json:"accountsDeployedCount"`
 }
 
 func toResponse(op db.UserOperation) operationResponse {
-	return operationResponse{
-		UserOpHash:     encodeHex(op.UserOpHash),
-		Sender:         encodeHex(op.Sender),
-		Paymaster:      encodeHex(op.Paymaster),
-		Target:         encodeHex(op.Target),
-		Calldata:       encodeHex(op.Calldata),
-		Nonce:          op.Nonce,
-		Success:        op.Success,
-		ActualGasCost:  op.ActualGasCost,
-		ActualGasUsed:  op.ActualGasUsed,
-		TxHash:         encodeHex(op.TxHash),
-		BlockNumber:    op.BlockNumber,
-		BlockTimestamp: op.BlockTimestamp,
-		LogIndex:       op.LogIndex,
+	r := operationResponse{
+		UserOpHash:      encodeHex(op.UserOpHash),
+		Sender:          encodeHex(op.Sender),
+		Paymaster:       encodeHex(op.Paymaster),
+		Target:          encodeHex(op.Target),
+		Calldata:        encodeHex(op.Calldata),
+		Nonce:           op.Nonce,
+		Success:         op.Success,
+		ActualGasCost:   op.ActualGasCost,
+		ActualGasUsed:   op.ActualGasUsed,
+		TxHash:          encodeHex(op.TxHash),
+		BlockNumber:     op.BlockNumber,
+		BlockTimestamp:  op.BlockTimestamp,
+		LogIndex:        op.LogIndex,
+		AccountDeployed: op.AccountDeployed,
 	}
+	// Only emit revertReason when the log carried non-empty data — empty
+	// bytes from the chain are a legitimate "no reason supplied" and should
+	// render as absent rather than "0x".
+	if len(op.RevertReason) > 0 {
+		r.RevertReason = encodeHex(op.RevertReason)
+	}
+	return r
 }
 
 // --- helpers ---
