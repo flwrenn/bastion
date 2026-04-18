@@ -35,10 +35,20 @@ func run() error {
 	// currently says and cause confusing "why is my new value not picked up"
 	// debugging sessions.
 	for _, path := range []string{".env", "../.env"} {
-		if err := godotenv.Overload(path); err == nil {
+		err := godotenv.Overload(path)
+		if err == nil {
 			slog.Info("loaded env file", "path", path)
 			break
 		}
+		if os.IsNotExist(err) {
+			// File missing at this path — try the next candidate silently.
+			continue
+		}
+		// File exists but couldn't be loaded (parse error, permission denied, etc.).
+		// Don't abort: the caller may have supplied env through other means. But
+		// surface the failure so a malformed .env doesn't get swallowed and turn
+		// into a confusing "DATABASE_URL is not set" later.
+		slog.Warn("failed to load env file", "path", path, "error", err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
