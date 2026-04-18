@@ -13,6 +13,7 @@ import (
 	"github.com/flwrenn/bastion/indexer/internal/api"
 	"github.com/flwrenn/bastion/indexer/internal/db"
 	"github.com/flwrenn/bastion/indexer/internal/indexer"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -23,6 +24,33 @@ func main() {
 }
 
 func run() error {
+	// Load .env from the current or parent directory, if present. Missing file
+	// is not fatal — production and CI supply env vars through other means.
+	// When running via `make dev` the working directory is indexer/, so we
+	// also try the repo root to pick up the shared .env there.
+	//
+	// Overload (not Load) intentionally: local dev's .env is the source of
+	// truth. Stale values exported in an earlier shell session (common with
+	// set -a; source .env; set +a) would otherwise override what the file
+	// currently says and cause confusing "why is my new value not picked up"
+	// debugging sessions.
+	for _, path := range []string{".env", "../.env"} {
+		err := godotenv.Overload(path)
+		if err == nil {
+			slog.Info("loaded env file", "path", path)
+			break
+		}
+		if os.IsNotExist(err) {
+			// File missing at this path — try the next candidate silently.
+			continue
+		}
+		// File exists but couldn't be loaded (parse error, permission denied, etc.).
+		// Don't abort: the caller may have supplied env through other means. But
+		// surface the failure so a malformed .env doesn't get swallowed and turn
+		// into a confusing "DATABASE_URL is not set" later.
+		slog.Warn("failed to load env file", "path", path, "error", err)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -86,7 +114,9 @@ func run() error {
 	mux.HandleFunc("GET /ws", hub.ServeWS)
 
 	// Health endpoints — no CORS (internal probes only).
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	// Pattern "GET /{$}" matches only the root path, avoiding a conflict with
+	// the "/api/" prefix under Go 1.26+ stricter precedence rules.
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"name":"bastion-indexer","status":"ok"}`)
 	})

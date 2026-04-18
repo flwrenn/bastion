@@ -2,7 +2,10 @@ services:
   postgres:
     image: postgres:17-alpine
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Host-side 54322 by default to avoid clashing with a system Postgres
+      # that's commonly already bound to 5432. Container-side stays on 5432.
+      # Override with POSTGRES_PORT=5432 if you want the default Postgres port.
+      - "${POSTGRES_PORT:-54322}:5432"
     environment:
       POSTGRES_USER: bastion
       POSTGRES_PASSWORD: bastion
