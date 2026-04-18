@@ -14,6 +14,14 @@ import {SmartAccount} from "./SmartAccount.sol";
 ///         on the first transaction from a new account.
 contract SmartAccountFactory {
     /// @notice The shared SmartAccount implementation behind all proxies.
+    /// @dev Intentionally lowerCamelCase (not SCREAMING_SNAKE_CASE): this
+    ///      public immutable generates an external getter that is part of
+    ///      the factory's ABI, consumed by the frontend, the deploy script,
+    ///      tests, and Etherscan-verified sources. Solidity convention for
+    ///      external-facing names is camelCase; the SCREAMING_SNAKE_CASE
+    ///      rule in AGENTS.md applies to private/internal immutables (e.g.
+    ///      `_ENTRY_POINT`).
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     SmartAccount public immutable accountImplementation;
 
     /// @notice Emitted when a new account proxy is deployed.

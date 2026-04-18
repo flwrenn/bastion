@@ -413,8 +413,11 @@ contract SmartAccountTest is Test {
         assertNotEq(validationData, 0);
         assertNotEq(validationData, 1);
 
-        // Decode: lowest 160 bits = aggregator (0), next 48 bits = validUntil, next 48 bits = validAfter
+        // Decode: lowest 160 bits = aggregator (0), next 48 bits = validUntil, next 48 bits = validAfter.
+        // uint48 truncation is safe because each field is a 48-bit slice by ERC-4337 packing spec.
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint48 validUntil = uint48(validationData >> 160);
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint48 validAfter = uint48(validationData >> 208);
         assertEq(validUntil, 5000);
         assertEq(validAfter, 100);
@@ -684,6 +687,8 @@ contract SmartAccountTest is Test {
         try entryPoint.handleOps(ops, beneficiary) {
             fail("handleOps should have reverted");
         } catch (bytes memory reason) {
+            // bytes4 truncation is safe: FailedOp's selector is exactly the first 4 bytes.
+            // forge-lint: disable-next-line(unsafe-typecast)
             assertEq(bytes4(reason), IEntryPoint.FailedOp.selector);
         }
     }
@@ -711,6 +716,8 @@ contract SmartAccountTest is Test {
         try entryPoint.handleOps(ops, beneficiary) {
             fail("handleOps should have reverted");
         } catch (bytes memory reason) {
+            // bytes4 truncation is safe: FailedOp's selector is exactly the first 4 bytes.
+            // forge-lint: disable-next-line(unsafe-typecast)
             assertEq(bytes4(reason), IEntryPoint.FailedOp.selector);
         }
     }
