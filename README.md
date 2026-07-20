@@ -248,6 +248,10 @@ One bullet per decision, in the order an evaluator is likely to ask about them.
 
 ## Limitations & Trade-offs
 
+- **No upgrade path.** Accounts sit behind ERC1967 proxies, but no UUPS upgrade authorization is exposed — the implementation address is fixed at deploy time. A bug in the implementation cannot be patched for existing accounts.
+- **No recovery mechanism.** `transferOwnership` requires the current owner's authorization, so a lost owner key still bricks the account — there is no social recovery or guardian scheme. A compromised-but-not-lost key, however, can be rotated out via `transferOwnership`.
+- **Session key fee surface.** Session keys don't constrain UserOp gas fields or paymaster choice. An in-scope compromised session key can grief a self-funded account's EntryPoint deposit by submitting ops with inflated gas parameters — the prefund is drawn from the account's deposit.
+- **Selector-level scoping only.** Session key scope stops at the 4-byte selector — there are no argument-level constraints. A key scoped to `transfer(address,uint256)` on a token can send the full balance to any address.
 - **Session keys are single-call only.** The account validates that the outer call is `execute`, not `executeBatch`. Lifting this would require scoping every inner call individually during `validateUserOp`.
 - **Session-key list is not enumerable on-chain.** Registered keys are stored in a non-iterable mapping; the UI tracks the set in memory and relies on `SessionKeyAdded` / `SessionKeyRevoked` events as the source of truth. A production UI would index these.
 - **Single EntryPoint on a single chain.** The indexer is configured for one `ENTRYPOINT` on one `RPC_URL`. Scaling to multiple contracts or chains would need a worker-per-chain model sharing the Postgres instance — orthogonal to the rest of the design, but not implemented.
