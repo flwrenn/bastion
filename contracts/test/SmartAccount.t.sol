@@ -833,6 +833,149 @@ contract SmartAccountTest is Test {
         assertEq(evilValidUntil, 0, "evil session key must not be registered");
     }
 
+    // ───────────────────── Ownership transfer tests ────────────────────
+
+    function test_transferOwnership_updatesOwnerAndEmitsEvent() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.expectEmit(true, true, false, false);
+        emit SmartAccount.OwnershipTransferred(owner, newOwner);
+
+        vm.prank(owner);
+        account.transferOwnership(newOwner);
+
+        assertEq(account.owner(), newOwner);
+    }
+
+    function test_transferOwnership_revertsZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(SmartAccount.InvalidNewOwner.selector);
+        account.transferOwnership(address(0));
+    }
+
+    function test_transferOwnership_revertsFromStranger() public {
+        vm.prank(stranger);
+        vm.expectRevert(SmartAccount.OnlyOwnerOrEntryPoint.selector);
+        account.transferOwnership(stranger);
+    }
+
+    function test_transferOwnership_viaEntryPoint() public {
+        address newOwner = makeAddr("newOwner");
+
+        bytes memory callData = abi.encodeCall(SmartAccount.transferOwnership, (newOwner));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, ownerKey);
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        assertEq(account.owner(), newOwner);
+    }
+
+    function test_transferOwnership_sessionKeyCannotEscalateViaSelfCall() public {
+        (address sessionKey, uint256 sessionPrivKey) = makeAddrAndKey("sessionKey");
+        address attacker = makeAddr("attacker");
+
+        // Deliberately scope the session key to target the account itself with
+        // transferOwnership's selector. _validateSessionKey passes (target, selector,
+        // and time bounds all match), but the self-call during execution hits
+        // onlyOwnerOrEntryPoint because msg.sender is address(account), not the
+        // EntryPoint or owner. Defense-in-depth: validation alone doesn't prevent
+        // this; the modifier does.
+        vm.prank(owner);
+        account.registerSessionKey(
+            sessionKey,
+            address(account),
+            SmartAccount.transferOwnership.selector,
+            uint48(block.timestamp),
+            uint48(block.timestamp + 1 hours)
+        );
+
+        bytes memory innerData = abi.encodeCall(SmartAccount.transferOwnership, (attacker));
+        bytes memory callData = abi.encodeCall(SmartAccount.execute, (address(account), 0, innerData));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, sessionPrivKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        // Validation succeeds — target and selector match the session key scope.
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertNotEq(validationData, 1, "validation should pass for scoped self-call");
+
+        // But the full flow through handleOps records success=false: the inner
+        // self-call reverts with OnlyOwnerOrEntryPoint because msg.sender is
+        // address(account) during the delegated call.
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+
+        vm.recordLogs();
+        entryPoint.handleOps(ops, beneficiary);
+
+        // The UserOperationEvent's success field (2nd non-indexed param) should be false.
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bool foundEvent = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (
+                logs[i].topics[0]
+                    == keccak256("UserOperationEvent(bytes32,address,address,uint256,bool,uint256,uint256)")
+            ) {
+                (, bool success,,) = abi.decode(logs[i].data, (uint256, bool, uint256, uint256));
+                assertFalse(success, "self-call should fail at execution time");
+                foundEvent = true;
+                break;
+            }
+        }
+        assertTrue(foundEvent, "UserOperationEvent not emitted");
+
+        // Confirm the escalation had no effect: owner is unchanged.
+        assertEq(account.owner(), owner, "owner must not change via session key self-call");
+    }
+
+    function test_transferOwnership_newOwnerSignatureValidAfterTransfer() public {
+        (address newOwner, uint256 newOwnerKey) = makeAddrAndKey("newOwner");
+
+        vm.prank(owner);
+        account.transferOwnership(newOwner);
+
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, newOwnerKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 0); // SIG_VALIDATION_SUCCESS
+
+        // Full flow: the nonce is only consumed by handleOps (a direct
+        // validateUserOp call doesn't touch the EntryPoint's NonceManager),
+        // so the same op can go through the real path.
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = userOp;
+        entryPoint.handleOps(ops, beneficiary);
+
+        assertEq(counter.getCount(address(account)), 1);
+    }
+
+    function test_transferOwnership_oldOwnerSignatureRejectedAfterTransfer() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.prank(owner);
+        account.transferOwnership(newOwner);
+
+        // The old owner is neither the current owner nor a registered session key.
+        bytes memory callData =
+            abi.encodeCall(SmartAccount.execute, (address(counter), 0, abi.encodeCall(Counter.increment, ())));
+        PackedUserOperation memory userOp = _buildUserOp(callData);
+        userOp.signature = _signUserOp(userOp, ownerKey);
+        bytes32 userOpHash = this.getUserOpHash(userOp);
+
+        vm.prank(address(entryPoint));
+        uint256 validationData = account.validateUserOp(userOp, userOpHash, 0);
+        assertEq(validationData, 1); // SIG_VALIDATION_FAILED
+    }
+
     // ─────────────── Execution: ETH forwarding & reverts ──────────────
 
     function test_execute_forwardsEthValue() public {
