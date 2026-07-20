@@ -50,6 +50,9 @@ contract SmartAccount is BaseAccount, Initializable {
     /// @notice Emitted when the owner revokes a session key (exam spec name).
     event SessionKeyRevoked(address indexed key);
 
+    /// @notice Emitted when ownership of the account is transferred.
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     // ───────────────────────────── Errors ──────────────────────────────
 
     error InvalidEntryPoint();
@@ -58,6 +61,7 @@ contract SmartAccount is BaseAccount, Initializable {
     error SessionKeyAlreadyRegistered(address key);
     error SessionKeyNotRegistered(address key);
     error InvalidSessionKeyParams();
+    error InvalidNewOwner();
 
     // ───────────────────────────── Modifiers ───────────────────────────
 
@@ -179,6 +183,24 @@ contract SmartAccount is BaseAccount, Initializable {
 
         delete sessionKeys[key];
         emit SessionKeyRevoked(key);
+    }
+
+    // ──────────────────────────── Ownership ────────────────────────────
+
+    /// @notice Transfer ownership of this account to a new EOA. Callable by the
+    ///         current owner directly or via the EntryPoint (owner-signed UserOp).
+    ///         Session keys cannot reach this function — same rationale as
+    ///         registerSessionKey: a self-call via execute has msg.sender =
+    ///         address(this), which fails the modifier.
+    /// @dev    Note: SmartAccountFactory.getAddress(owner, salt) derives the
+    ///         counterfactual address from the INITIAL owner — after a transfer,
+    ///         the factory mapping no longer corresponds to the current owner.
+    /// @param newOwner The EOA that will own this account. Must not be address(0).
+    function transferOwnership(address newOwner) external onlyOwnerOrEntryPoint {
+        if (newOwner == address(0)) revert InvalidNewOwner();
+        address previousOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(previousOwner, newOwner);
     }
 
     // ──────────────────────────── Execution ────────────────────────────

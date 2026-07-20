@@ -74,8 +74,8 @@
 	}
 
 	$effect(() => {
-		// Reload when accountAddress changes.
-		accountAddress;
+		// Reload when accountAddress changes (void read registers the dependency).
+		void accountAddress;
 		loadCount();
 	});
 </script>
@@ -116,6 +116,7 @@
 			{#if lastTxHash}
 				<p>
 					Tx:
+					<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 					<a
 						href={etherscanTx(lastTxHash)}
 						target="_blank"
@@ -124,6 +125,7 @@
 					>
 						{truncateHex(lastTxHash)}
 					</a>
+					<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				</p>
 			{/if}
 		</div>

@@ -36,7 +36,7 @@
 					{pct(stats.successRate)}
 				</span>
 			{:else}
-				{'\u2014'}
+				—
 			{/if}
 		</p>
 		{#if stats && stats.totalOps > 0}
@@ -55,7 +55,7 @@
 					{pct(stats.sponsoredRate)}
 				</span>
 			{:else}
-				{'\u2014'}
+				—
 			{/if}
 		</p>
 		{#if stats && stats.totalOps > 0}

@@ -39,6 +39,7 @@
 						<div class="flex justify-between">
 							<dt class="text-zinc-400">Account Address</dt>
 							<dd class="font-mono text-sm">
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 								<a
 									href={etherscanAddress(account.smartAccountAddress)}
 									target="_blank"
@@ -47,6 +48,7 @@
 								>
 									{truncateHex(account.smartAccountAddress)}
 								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</dd>
 						</div>
 						<div class="flex justify-between">

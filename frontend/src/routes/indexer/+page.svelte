@@ -58,6 +58,7 @@
 				const dataHex = raw.slice(8 + 128, 8 + 128 + strLen * 2);
 				const bytes = new Uint8Array(dataHex.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
 				const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+				// eslint-disable-next-line no-control-regex -- deliberate control-character detection for revert-reason sanitization
 				if (!/[\x00-\x08\x0e-\x1f]/.test(text)) return text;
 			} catch {
 				// fall through to raw hex
@@ -68,6 +69,7 @@
 		try {
 			const bytes = new Uint8Array(raw.match(/.{2}/g)?.map((b) => parseInt(b, 16)) ?? []);
 			const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+			// eslint-disable-next-line no-control-regex -- deliberate control-character detection for revert-reason sanitization
 			if (text.length > 0 && !/[\x00-\x08\x0e-\x1f]/.test(text)) return text;
 		} catch {
 			// fall through
@@ -145,6 +147,7 @@
 
 							<!-- Sender -->
 							<td class="px-4 py-3 font-mono text-xs">
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 								<a
 									href={etherscanAddress(op.sender)}
 									target="_blank"
@@ -153,11 +156,13 @@
 								>
 									{truncateHex(op.sender)}
 								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</td>
 
 							<!-- Paymaster -->
 							<td class="px-4 py-3 font-mono text-xs">
 								{#if isSponsored(op.paymaster)}
+									<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 									<a
 										href={etherscanAddress(op.paymaster)}
 										target="_blank"
@@ -166,6 +171,7 @@
 									>
 										{truncateHex(op.paymaster)}
 									</a>
+									<!-- eslint-enable svelte/no-navigation-without-resolve -->
 									<span
 										class="ml-1.5 inline-block rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300"
 									>
@@ -211,6 +217,7 @@
 
 							<!-- Block -->
 							<td class="px-4 py-3 text-right font-mono text-xs">
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 								<a
 									href={etherscanBlock(op.blockNumber)}
 									target="_blank"
@@ -219,6 +226,7 @@
 								>
 									{op.blockNumber}
 								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</td>
 
 							<!-- Timestamp -->
@@ -228,6 +236,7 @@
 
 							<!-- Tx Link -->
 							<td class="px-4 py-3">
+								<!-- eslint-disable svelte/no-navigation-without-resolve -- external Etherscan URL, not app navigation -->
 								<a
 									href={etherscanTx(op.txHash)}
 									target="_blank"
@@ -237,6 +246,7 @@
 								>
 									{truncateHex(op.txHash)}
 								</a>
+								<!-- eslint-enable svelte/no-navigation-without-resolve -->
 							</td>
 						</tr>
 					{/each}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -97,6 +98,63 @@ func TestBroadcastDropsSlowClient(t *testing.T) {
 
 	if exists {
 		t.Fatal("expected slow client to be removed")
+	}
+}
+
+func TestBroadcastMultipleMessagesDropsSlowClientOnce(t *testing.T) {
+	t.Parallel()
+
+	hub := NewHub()
+	slow := &wsClient{send: make(chan []byte)} // unbuffered = always full
+	healthy := &wsClient{send: make(chan []byte, clientSendBuffer)}
+	hub.mu.Lock()
+	hub.clients[slow] = struct{}{}
+	hub.clients[healthy] = struct{}{}
+	hub.mu.Unlock()
+
+	ops := make([]db.UserOperation, 5)
+	for i := range ops {
+		ops[i] = testOp()
+		ops[i].Nonce = strconv.Itoa(i)
+	}
+
+	// Before the labeled-continue fix this panicked: the slow client's
+	// first failed send closed its channel, and the next message in the
+	// batch was sent on the closed channel.
+	hub.Broadcast(ops)
+
+	hub.mu.Lock()
+	_, exists := hub.clients[slow]
+	hub.mu.Unlock()
+	if exists {
+		t.Fatal("expected slow client to be removed")
+	}
+
+	// Slow client's send channel must be closed; nothing was ever
+	// delivered on it, so a receive returns immediately with ok=false.
+	if _, ok := <-slow.send; ok {
+		t.Fatal("expected slow client send channel to be closed")
+	}
+
+	// Healthy client must receive all messages in order.
+	for i := range ops {
+		select {
+		case msg := <-healthy.send:
+			var resp operationResponse
+			if err := json.Unmarshal(msg, &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if want := strconv.Itoa(i); resp.Nonce != want {
+				t.Fatalf("nonce = %q, want %q", resp.Nonce, want)
+			}
+		default:
+			t.Fatalf("expected message %d on healthy client send channel", i)
+		}
+	}
+	select {
+	case msg := <-healthy.send:
+		t.Fatalf("unexpected extra message: %s", msg)
+	default:
 	}
 }
 
