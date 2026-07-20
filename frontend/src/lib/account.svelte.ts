@@ -1,11 +1,8 @@
-import { http } from 'viem';
-import { sepolia } from 'viem/chains';
-import { createPaymasterClient } from 'viem/account-abstraction';
-import { createSmartAccountClient } from 'permissionless';
 import { publicClient, wallet } from '$lib/wallet.svelte';
 import { SmartAccountFactoryAbi } from '$lib/contracts/SmartAccountFactory';
 import { toBastionSmartAccount } from '$lib/smartAccount';
-import { factoryAddress, pimlicoUrl } from '$lib/config';
+import { createBundlerClientFor } from '$lib/userOp';
+import { factoryAddress } from '$lib/config';
 
 class AccountState {
 	smartAccountAddress = $state<`0x${string}` | null>(null);
@@ -91,18 +88,7 @@ class AccountState {
 
 			if (id !== this.deployId) return;
 
-			const pimlico = pimlicoUrl();
-
-			const paymaster = createPaymasterClient({
-				transport: http(pimlico)
-			});
-
-			const bundlerClient = createSmartAccountClient({
-				account: smartAccount,
-				paymaster,
-				chain: sepolia,
-				bundlerTransport: http(pimlico)
-			});
+			const bundlerClient = await createBundlerClientFor(smartAccount);
 
 			// Send a no-op call to self — the first UserOp auto-deploys via initCode.
 			const hash = await bundlerClient.sendUserOperation({

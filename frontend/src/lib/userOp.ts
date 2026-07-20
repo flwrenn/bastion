@@ -8,9 +8,9 @@
 import type { Account, Address, Chain, Hex, LocalAccount, Transport, WalletClient } from 'viem';
 import { http } from 'viem';
 import { sepolia } from 'viem/chains';
-import type { SmartAccount } from 'viem/account-abstraction';
-import { createPaymasterClient } from 'viem/account-abstraction';
+import { entryPoint07Address, type SmartAccount } from 'viem/account-abstraction';
 import { createSmartAccountClient } from 'permissionless';
+import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { publicClient } from '$lib/wallet.svelte';
 import { toBastionSmartAccount, toSessionKeySmartAccount } from '$lib/smartAccount';
 import { factoryAddress, pimlicoUrl } from '$lib/config';
@@ -27,19 +27,28 @@ export type UserOpResult = {
 	success: boolean;
 };
 
-/** Create a SmartAccountClient (bundler + paymaster) for a given SmartAccount adapter. */
-async function createBundlerClientFor(account: SmartAccount) {
+/** Create a SmartAccountClient (bundler + paymaster) for a given SmartAccount adapter.
+ *
+ * Uses Pimlico's `pimlico_*` paymaster methods (free-tier compatible) via
+ * `createPimlicoClient`, NOT the ERC-7677 `pm_*` methods that viem's
+ * `createPaymasterClient` would call (those are paid-tier on Pimlico).
+ */
+export async function createBundlerClientFor(account: SmartAccount) {
 	const pimlico = pimlicoUrl();
 
-	const paymaster = createPaymasterClient({
-		transport: http(pimlico)
+	const pimlicoClient = createPimlicoClient({
+		transport: http(pimlico),
+		entryPoint: { address: entryPoint07Address, version: '0.7' }
 	});
 
 	return createSmartAccountClient({
 		account,
-		paymaster,
+		paymaster: pimlicoClient,
 		chain: sepolia,
-		bundlerTransport: http(pimlico)
+		bundlerTransport: http(pimlico),
+		userOperation: {
+			estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast
+		}
 	});
 }
 
