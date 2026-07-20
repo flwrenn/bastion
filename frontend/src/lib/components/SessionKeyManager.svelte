@@ -69,9 +69,9 @@
 		selectedTarget.functions[selectedFnIndex] ?? selectedTarget.functions[0]
 	);
 
-	// Reset function index when target changes.
+	// Reset function index when target changes (void read registers the dependency).
 	$effect(() => {
-		selectedTargetId;
+		void selectedTargetId;
 		selectedFnIndex = 0;
 	});
 
@@ -274,7 +274,7 @@
 					bind:value={selectedTargetId}
 					class="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
 				>
-					{#each TARGETS as target}
+					{#each TARGETS as target (target.id)}
 						<option value={target.id}>{target.label}</option>
 					{/each}
 				</select>
@@ -288,7 +288,7 @@
 					bind:value={selectedFnIndex}
 					class="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
 				>
-					{#each selectedTarget.functions as fn, i}
+					{#each selectedTarget.functions as fn, i (fn.selector)}
 						<option value={i}>{fn.label}</option>
 					{/each}
 				</select>
@@ -332,7 +332,7 @@
 			</p>
 
 			<div class="mt-4 space-y-3">
-				{#each keys as entry, i}
+				{#each keys as entry, i (i)}
 					{@const status = keyStatus(entry)}
 					<div
 						class="rounded border p-3"
