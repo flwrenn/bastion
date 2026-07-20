@@ -68,14 +68,17 @@ func (h *Hub) Broadcast(ops []db.UserOperation) {
 	var slow []*wsClient
 
 	h.mu.Lock()
+clients:
 	for c := range h.clients {
 		for _, msg := range messages {
 			select {
 			case c.send <- msg:
 			default:
+				// removeClientLocked closes c.send; skip the rest of
+				// the batch so we never send on the closed channel.
 				h.removeClientLocked(c)
 				slow = append(slow, c)
-				break
+				continue clients
 			}
 		}
 	}
