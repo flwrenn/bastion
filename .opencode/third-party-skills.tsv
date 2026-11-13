@@ -1,0 +1,3 @@
+skill	repo	path	commit	license
+svelte-code-writer	sveltejs/ai-tools	packages/opencode/skills/svelte-code-writer	d3e755b	MIT
+svelte-core-bestpractices	sveltejs/ai-tools	packages/opencode/skills/svelte-core-bestpractices	d3e755b	MIT
