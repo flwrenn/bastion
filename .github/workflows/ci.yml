@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      # The action's cache holds RPC fork responses; no test here forks.
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          version: v1.5.1
+          cache: false
+
+      - name: Test
+        working-directory: contracts
+        run: forge test -vvv
+
+  indexer:
+    name: Indexer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # An explicit bash shell runs with pipefail, which the Test step needs
+        # so that `go test | tee` fails when the tests fail.
+        shell: bash
+        working-directory: indexer
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: bastion
+          POSTGRES_PASSWORD: bastion
+          POSTGRES_DB: bastion
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bastion -d bastion"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://bastion:bastion@localhost:5432/bastion?sslmode=disable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: indexer/go.mod
+          cache-dependency-path: indexer/go.sum
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 -v ./... 2>&1 | tee "$RUNNER_TEMP/go-test.log"
+
+      # Integration tests skip themselves when TEST_DATABASE_URL is unset or
+      # empty, and a skip still exits 0. Without this step a broken database
+      # setup would pass while testing nothing.
+      - name: Fail on skipped tests
+        run: |
+          if grep -- '--- SKIP' "$RUNNER_TEMP/go-test.log"; then
+            echo "::error::Tests were skipped; every test must run in CI, including the Postgres integration tests."
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          version: v1.5.1
+          cache: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9.15.2
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      # The frontend imports ABIs from src/lib/contracts, which are generated
+      # from the compiled contracts and not committed.
+      - name: Generate contract ABIs
+        run: make export-abis
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: frontend
+        run: pnpm run lint
+
+      # Lint, type check and build each report on their own, so one failing
+      # does not hide the result of the others.
+      - name: Type check
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: pnpm run check
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        working-directory: frontend
+        run: pnpm run build
