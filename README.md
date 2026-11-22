@@ -1,5 +1,7 @@
 # Bastion
 
+[![CI](https://github.com/flwrenn/bastion/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/flwrenn/bastion/actions/workflows/ci.yml)
+
 ERC-4337 smart account system with session key support and an EVM event indexer, sharing a single SvelteKit frontend.
 
 Built with Foundry (Solidity), Go (`net/http`), and SvelteKit 2 (Svelte 5, viem, permissionless.js).
@@ -264,5 +266,14 @@ make test          # forge test -vvv  +  go test ./...
 make forge-test    # contracts only
 make indexer-test  # indexer only
 ```
+
+The indexer's Postgres integration tests, which include the reorg tests, skip unless `TEST_DATABASE_URL` is set. Each test creates its own schema and drops it afterwards, so the development database is safe to use:
+
+```sh
+make db-up
+TEST_DATABASE_URL='postgres://bastion:bastion@localhost:54322/bastion?sslmode=disable' make indexer-test
+```
+
+CI runs the contract tests, the indexer tests against Postgres, and the frontend lint, type check, and build on every pull request. It fails if any Go test is skipped.
 
 The frontend has no automated test suite — see [Limitations & Trade-offs](#limitations--trade-offs). Verification there is manual via the [Demo Walkthrough](#demo-walkthrough).
